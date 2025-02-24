@@ -1,0 +1,14 @@
+{
+  "sources": {
+    "usgs_water_surface_elevation": {}
+  },
+  "storage": {
+    "local": {
+      "path": "./data/cache"
+    },
+    "s3": {}
+  },
+  "database": {
+    "path": "./data/gsl.db"
+  }
+}
