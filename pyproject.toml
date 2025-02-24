@@ -1,0 +1,10 @@
+[project]
+name = "gsl-forecast"
+version = "0.1.0"
+description = "Forecasting the Great Salt Lake's depth"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=1.2.0",
+    "pytest>=8.3.4",
+]
