@@ -1,6 +1,13 @@
 {
   "sources": {
-    "usgs_water_surface_elevation": {}
+    "usgs_water_surface_elevation_continuous": {
+      "url": "https://waterservices.usgs.gov/nwis/iv/?sites={site}&agencyCd=USGS&parameterCd=62614&format=rdb&startDT={start}&endDT={end}",
+      "site_id": "10010100"
+    },
+    "usgs_water_surface_elevation_daily": {
+      "url": "https://waterservices.usgs.gov/nwis/dv?format=json&siteStatus=all&site={site}&agencyCd=USGS&statCd=00003&parameterCd=62614&startDT={start}&endDT={end}",
+      "site_id": "10010000"
+    }
   },
   "storage": {
     "local": {
