@@ -167,3 +167,27 @@ cython_debug/
 
 data/
 .context/
+
+# Database files
+*.db
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment and dependency files
+.env
+.venv
+env/
+venv/
+ENV/
+.uv
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/

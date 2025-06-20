@@ -177,11 +177,17 @@ wheels = [
 ]
 
 [[package]]
+name = "experiment-tracker"
+version = "0.1.0"
+source = { git = "https://github.com/jcblsn/experiment-tracker.git?rev=main#2a54a552d8f0efdec7974d2f947da79224b01e40" }
+
+[[package]]
 name = "gsl-forecast"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "experiment-tracker" },
     { name = "pandas" },
     { name = "pytest" },
     { name = "requests" },
@@ -195,6 +201,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.2.0" },
+    { name = "experiment-tracker", git = "https://github.com/jcblsn/experiment-tracker.git?rev=main" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "requests", specifier = ">=2.32.3" },

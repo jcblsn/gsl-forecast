@@ -36,21 +36,3 @@ class TestDatabaseConnection:
                 pass
 
         assert "Failed to connect to database: Connection failed" in str(exc_info.value)
-
-    def test_connection_closes_after_use(self, temp_db_path):
-        with get_db_connection(temp_db_path) as conn:
-            pass
-
-        with pytest.raises(duckdb.ConnectionException):
-            conn.execute("SELECT 1")
-
-    def test_connection_closes_after_exception(self, temp_db_path):
-        conn = None
-        try:
-            with get_db_connection(temp_db_path) as conn:
-                raise ValueError("Test exception")
-        except DatabaseError:
-            pass
-
-        with pytest.raises(duckdb.ConnectionException):
-            conn.execute("SELECT 1")

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "duckdb>=1.2.0",
+    "experiment-tracker",
     "pandas>=2.2.3",
     "pytest>=8.3.4",
     "requests>=2.32.3",
@@ -13,6 +14,9 @@ dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+experiment-tracker = { git = "https://github.com/jcblsn/experiment-tracker.git", rev = "main" }
 
 [dependency-groups]
 dev = [
