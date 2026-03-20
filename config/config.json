@@ -9,12 +9,6 @@
       "site_id": "10010000"
     }
   },
-  "storage": {
-    "local": {
-      "path": "./data/cache"
-    },
-    "s3": {}
-  },
   "database": {
     "path": "./data/gsl.db"
   }
