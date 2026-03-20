@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "gsl-forecast"
 version = "0.1.0"
@@ -8,12 +12,23 @@ dependencies = [
     "duckdb>=1.2.0",
     "experiment-tracker",
     "pandas>=2.2.3",
+    "plotnine>=0.14.0",
     "pytest>=8.3.4",
     "requests>=2.32.3",
 ]
 
+[project.scripts]
+gsl-pipeline = "src.pipeline.elt:run_pipeline"
+gsl-forecast = "src.forecasting.run_forecast:run_forecasts"
+gsl-plot = "src.forecasting.plot_forecasts:plot_forecasts"
+gsl-cv = "src.forecasting.cross_validate:run_cross_validation"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.uv.sources]
 experiment-tracker = { git = "https://github.com/jcblsn/experiment-tracker.git", rev = "main" }
