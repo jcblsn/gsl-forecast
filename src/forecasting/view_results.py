@@ -5,17 +5,11 @@ import pandas as pd
 from experiment_tracker import ExperimentTracker
 
 
-def get_experiment_info(
-    tracker: ExperimentTracker, experiment_id: int
-) -> Optional[Dict]:
-    return tracker.get_experiment(experiment_id)
-
-
 def get_run_metrics(tracker: ExperimentTracker, run_id: int) -> Optional[Dict]:
     try:
-        models = tracker.get_models(run_id)
+        model = tracker.get_model(run_id)
         metrics = tracker.get_metrics(run_id)
-        model_name = models[0]["name"] if models else "Unknown"
+        model_name = model["model_name"] if model else "Unknown"
         return {"run_id": run_id, "model": model_name, **metrics}
     except (ValueError, IndexError):
         return None
@@ -25,7 +19,7 @@ def create_metrics_summary(
     tracker: ExperimentTracker, experiment_id: int
 ) -> Optional[pd.DataFrame]:
     runs = tracker.get_run_history(experiment_id)
-    metrics_list = [get_run_metrics(tracker, run["id"]) for run in runs]
+    metrics_list = [get_run_metrics(tracker, run["run_id"]) for run in runs]
     metrics_list = [m for m in metrics_list if m is not None]
 
     if not metrics_list:
@@ -38,7 +32,7 @@ def view_experiment(
     experiment_id: int, experiment_db: str = "forecast_experiments.db"
 ) -> Optional[pd.DataFrame]:
     tracker = ExperimentTracker(experiment_db)
-    experiment = get_experiment_info(tracker, experiment_id)
+    experiment = tracker.get_experiment(experiment_id)
 
     if not experiment:
         print(f"No experiment found with ID {experiment_id}")

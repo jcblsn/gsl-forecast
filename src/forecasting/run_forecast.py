@@ -1,14 +1,25 @@
 import argparse
+import json
 import logging
+import os
 from typing import Any, Dict, List
 
+import duckdb
 import pandas as pd
 from experiment_tracker import ExperimentTracker
 
-from forecasting.univariate.moving_average import MovingAverageForecaster
-from forecasting.univariate.naive import NaiveForecaster
-from utils.connect_db import get_db_connection
-from utils.load_config import load_configuration
+from src.forecasting.univariate.drift import DriftForecaster
+from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
+from src.forecasting.univariate.moving_average import MovingAverageForecaster
+from src.forecasting.univariate.naive import NaiveForecaster
+from src.forecasting.univariate.theta import ThetaForecaster
+
+
+def _load_config(config_path: str = None) -> Dict[str, Any]:
+    if config_path is None:
+        config_path = "config/config.json"
+    with open(config_path) as f:
+        return json.load(f)
 
 
 def get_forecasters() -> List:
@@ -18,13 +29,12 @@ def get_forecasters() -> List:
         MovingAverageForecaster(window=3),
         MovingAverageForecaster(window=6),
         MovingAverageForecaster(window=12),
+        DriftForecaster(window=24),
+        HoltWintersForecaster(trend="add", seasonal="add", seasonal_periods=12, damped_trend=True),
+        HoltWintersForecaster(trend="add", seasonal="add", seasonal_periods=12, damped_trend=False),
+        HoltWintersForecaster(trend="add", seasonal=None, damped_trend=True),
+        ThetaForecaster(),
     ]
-
-
-def setup_config(config_path: str = None) -> Dict[str, Any]:
-    if config_path is None:
-        config_path = "config/config.json"
-    return load_configuration(config_path)
 
 
 def prepare_data(conn, validation_months: int):
@@ -33,13 +43,9 @@ def prepare_data(conn, validation_months: int):
     if validation_months > 0:
         train_df = full_df.iloc[:-validation_months].copy()
         val_df = full_df.iloc[-validation_months:].copy()
-        logging.info(
-            f"Split data: {len(train_df)} training rows, {len(val_df)} validation rows"
-        )
     else:
         train_df = full_df.copy()
         val_df = pd.DataFrame()
-        logging.info(f"Using all {len(train_df)} rows for training")
 
     return full_df, train_df, val_df
 
@@ -59,9 +65,7 @@ def run_validation(forecaster, tracker, run_id, train_df, val_df):
     )
 
     if not val_merged.empty:
-        valid_preds = val_merged["pred"].tolist()
-        valid_actuals = val_merged["avg_elevation"].tolist()
-        tracker.log_predictions(run_id, valid_preds, valid_actuals)
+        tracker.log_predictions(run_id, val_merged["pred"].tolist(), val_merged["avg_elevation"].tolist())
 
 
 def store_predictions(conn, predictions):
@@ -81,11 +85,8 @@ def store_predictions(conn, predictions):
         )
 
 
-def run_single_forecaster(
-    forecaster, tracker, exp_id, full_df, train_df, val_df, horizon, conn
-):
+def run_single_forecaster(forecaster, tracker, exp_id, full_df, train_df, val_df, horizon, conn):
     run_id = tracker.start_run(exp_id)
-    logging.info(f"Started run {run_id} for model {forecaster.name}")
 
     try:
         tracker.log_model(run_id, forecaster.name, forecaster.get_metrics())
@@ -96,11 +97,10 @@ def run_single_forecaster(
         store_predictions(conn, future_predictions)
 
         tracker.end_run(run_id)
-        logging.info(f"Completed run {run_id} for model {forecaster.name}")
         return future_predictions
 
     except Exception as e:
-        logging.error(f"Error running forecaster {forecaster.name}: {str(e)}")
+        logging.error(f"Error running forecaster {forecaster.name}: {e}")
         tracker.end_run(run_id, success=False, error=str(e))
         return None
 
@@ -115,18 +115,17 @@ def run_forecasts(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    config = setup_config(config_path)
+    config = _load_config(config_path)
     tracker = ExperimentTracker(experiment_db)
-    experiment_name = f"GSL_Forecast_{pd.Timestamp.now().strftime('%Y%m%d')}"
     exp_id = tracker.create_experiment(
-        experiment_name,
+        f"GSL_Forecast_{pd.Timestamp.now().strftime('%Y%m%d')}",
         f"Great Salt Lake forecast run with horizon={horizon}, validation_months={validation_months}",
     )
 
     forecasters = get_forecasters()
     all_predictions = []
 
-    with get_db_connection(config["database"]["path"]) as conn:
+    with duckdb.connect(config["database"]["path"]) as conn:
         full_df, train_df, val_df = prepare_data(conn, validation_months)
 
         for forecaster in forecasters:
@@ -147,20 +146,9 @@ def run_forecasts(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run GSL water level forecasts")
     parser.add_argument("--config", help="Path to config file")
-    parser.add_argument(
-        "--horizon", type=int, default=12, help="Forecast horizon in months"
-    )
-    parser.add_argument(
-        "--experiment-db",
-        default="forecast_experiments.db",
-        help="Path to experiment database",
-    )
-    parser.add_argument(
-        "--validation-months",
-        type=int,
-        default=6,
-        help="Number of months to use for validation (0 to use all data for training)",
-    )
+    parser.add_argument("--horizon", type=int, default=12, help="Forecast horizon in months")
+    parser.add_argument("--experiment-db", default="forecast_experiments.db", help="Path to experiment database")
+    parser.add_argument("--validation-months", type=int, default=6, help="Number of months to use for validation")
 
     args = parser.parse_args()
     run_forecasts(
