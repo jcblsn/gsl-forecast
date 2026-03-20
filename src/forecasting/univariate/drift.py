@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Self
 
 import pandas as pd
@@ -16,8 +17,16 @@ class DriftForecaster(Forecaster):
         self.target_col = target_col
 
     def fit(self, data: pd.DataFrame) -> Self:
-        data = data.sort_values(self.time_col).tail(self.window + 1)
+        data = data.sort_values(self.time_col)
+        if len(data) < 2:
+            raise ValueError(f"DriftForecaster requires at least 2 observations, got {len(data)}")
+        data = data.tail(self.window + 1)
         vals = data[self.target_col].values
+        if len(vals) < self.window + 1:
+            logging.warning(
+                f"DriftForecaster: requested window={self.window} but only {len(vals) - 1} "
+                f"intervals available; slope estimated from available data"
+            )
         self.last_value = vals[-1]
         self.slope = (vals[-1] - vals[0]) / (len(vals) - 1)
         self.last_date = data[self.time_col].max()

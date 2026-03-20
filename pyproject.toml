@@ -13,8 +13,9 @@ dependencies = [
     "experiment-tracker",
     "pandas>=2.2.3",
     "plotnine>=0.14.0",
-    "pytest>=8.3.4",
+    "python-dateutil>=2.9.0",
     "requests>=2.32.3",
+    "statsmodels>=0.14.0",
 ]
 
 [project.scripts]
@@ -36,4 +37,5 @@ experiment-tracker = { git = "https://github.com/jcblsn/experiment-tracker.git",
 [dependency-groups]
 dev = [
     "ipykernel>=6.29.5",
+    "pytest>=8.3.4",
 ]

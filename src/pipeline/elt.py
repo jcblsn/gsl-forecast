@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from datetime import datetime
@@ -7,13 +6,7 @@ from typing import Optional
 import duckdb
 import requests
 
-
-def _load_config(config_path: Optional[str] = None) -> dict:
-    if config_path is None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        config_path = os.path.join(base_dir, "config", "config.json")
-    with open(config_path) as f:
-        return json.load(f)
+from src.config import load_config
 
 
 def ingest_continuous(conn: duckdb.DuckDBPyConnection, source_config: dict) -> None:
@@ -89,11 +82,16 @@ def ingest_daily(conn: duckdb.DuckDBPyConnection, source_config: dict) -> None:
     response = requests.get(url)
     response.raise_for_status()
 
-    try:
-        daily_ts = response.json()["value"]["timeSeries"][0]["values"][0]["value"]
-    except (KeyError, IndexError, TypeError) as e:
-        logging.warning(f"No daily data found in response: {e}")
+    data = response.json()
+    time_series = data.get("value", {}).get("timeSeries", [])
+    if not time_series:
+        logging.info(f"No timeSeries in USGS response for {start_date} to {end_date} — no new data")
         return
+
+    try:
+        daily_ts = time_series[0]["values"][0]["value"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(f"Unexpected USGS daily response structure: {e}\nURL: {url}") from e
 
     rows = []
     for entry in daily_ts:
@@ -104,7 +102,8 @@ def ingest_daily(conn: duckdb.DuckDBPyConnection, source_config: dict) -> None:
             elevation_val = float(entry.get("value", ""))
         except ValueError:
             continue
-        qualifiers_val = entry.get("qualifiers", [""])[0]
+        qualifiers = entry.get("qualifiers", [""])
+        qualifiers_val = qualifiers[0] if isinstance(qualifiers, list) else str(qualifiers)
         rows.append((date_str, elevation_val, qualifiers_val))
 
     if rows:
@@ -135,7 +134,7 @@ def run_pipeline(config_path: Optional[str] = None) -> None:
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    config = _load_config(config_path)
+    config = load_config(config_path)
     db_path = config["database"]["path"]
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 

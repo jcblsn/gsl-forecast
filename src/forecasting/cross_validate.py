@@ -1,7 +1,5 @@
 import argparse
-import json
 import logging
-import os
 import random
 from typing import Optional
 
@@ -9,6 +7,8 @@ import duckdb
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 from experiment_tracker import ExperimentTracker
+
+from src.config import load_config
 from plotnine import (
     aes,
     element_blank,
@@ -52,14 +52,6 @@ def get_all_forecasters() -> list:
         # Theta
         ThetaForecaster(),
     ]
-
-
-def _load_config(config_path: Optional[str] = None) -> dict:
-    if config_path is None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        config_path = os.path.join(base_dir, "config", "config.json")
-    with open(config_path) as f:
-        return json.load(f)
 
 
 def load_monthly_data(db_path: str) -> pd.DataFrame:
@@ -144,7 +136,7 @@ def run_cross_validation(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    config = _load_config(config_path)
+    config = load_config(config_path)
     data = load_monthly_data(config["database"]["path"])
 
     cutoffs = sample_cutoffs(data, n_cutoffs, history_years, horizon, seed)
@@ -174,16 +166,31 @@ def run_cross_validation(
     tracker = ExperimentTracker(experiment_db)
     train_desc = f", training from {train_start}" if train_start else ""
     exp_id = tracker.create_experiment(
-        f"GSL_CV_{pd.Timestamp.now().strftime('%Y%m%d')}",
+        f"GSL_CV_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}",
         f"Walk-forward CV: {n_cutoffs} cutoffs, {horizon}-month horizon, last {history_years} years{train_desc}",
     )
 
+    # Log data provenance on the experiment
+    data_min = str(data["month"].min().date())
+    data_max = str(data["month"].max().date())
+    tracker.log_tag("experiment", exp_id, "data_min", data_min)
+    tracker.log_tag("experiment", exp_id, "data_max", data_max)
+    tracker.log_tag("experiment", exp_id, "n_months_available", str(len(data)))
+    if train_start:
+        tracker.log_tag("experiment", exp_id, "train_start", train_start)
+
+    models_in_results = set(cv_df["model"].unique())
+
     for forecaster in forecasters:
-        model_df = cv_df[cv_df["model"] == forecaster.name]
-        if model_df.empty:
-            continue
         run_id = tracker.start_run(exp_id)
         tracker.log_model(run_id, forecaster.name, forecaster.get_metrics())
+
+        model_df = cv_df[cv_df["model"] == forecaster.name]
+        if forecaster.name not in models_in_results or model_df.empty:
+            # Forecaster failed at all cutoffs — log as failed run
+            tracker.end_run(run_id, success=False, error="Failed at all cutoffs during CV")
+            logging.warning(f"No results for {forecaster.name} — logged as failed run")
+            continue
 
         # Log aggregate predictions (gives overall MAE/RMSE)
         tracker.log_predictions(

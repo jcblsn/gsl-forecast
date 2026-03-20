@@ -1,25 +1,17 @@
 import argparse
-import json
 import logging
-import os
 from typing import Any, Dict, List
 
 import duckdb
 import pandas as pd
 from experiment_tracker import ExperimentTracker
 
+from src.config import load_config
 from src.forecasting.univariate.drift import DriftForecaster
 from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
 from src.forecasting.univariate.moving_average import MovingAverageForecaster
 from src.forecasting.univariate.naive import NaiveForecaster
 from src.forecasting.univariate.theta import ThetaForecaster
-
-
-def _load_config(config_path: str = None) -> Dict[str, Any]:
-    if config_path is None:
-        config_path = "config/config.json"
-    with open(config_path) as f:
-        return json.load(f)
 
 
 def get_forecasters() -> List:
@@ -115,10 +107,10 @@ def run_forecasts(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    config = _load_config(config_path)
+    config = load_config(config_path)
     tracker = ExperimentTracker(experiment_db)
     exp_id = tracker.create_experiment(
-        f"GSL_Forecast_{pd.Timestamp.now().strftime('%Y%m%d')}",
+        f"GSL_Forecast_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}",
         f"Great Salt Lake forecast run with horizon={horizon}, validation_months={validation_months}",
     )
 
@@ -127,6 +119,13 @@ def run_forecasts(
 
     with duckdb.connect(config["database"]["path"]) as conn:
         full_df, train_df, val_df = prepare_data(conn, validation_months)
+
+        data_min = str(full_df["month"].min().date())
+        data_max = str(full_df["month"].max().date())
+        tracker.log_tag("experiment", exp_id, "data_min", data_min)
+        tracker.log_tag("experiment", exp_id, "data_max", data_max)
+        tracker.log_tag("experiment", exp_id, "n_months", str(len(full_df)))
+        logging.info(f"Training data: {data_min} to {data_max} ({len(full_df)} months)")
 
         for forecaster in forecasters:
             logging.info(f"Running forecaster: {forecaster.name}")

@@ -1,10 +1,10 @@
 import argparse
-import json
-import os
 from typing import Optional
 
 import duckdb
 import pandas as pd
+
+from src.config import load_config
 from plotnine import (
     aes,
     element_blank,
@@ -18,14 +18,6 @@ from plotnine import (
     theme,
     theme_bw,
 )
-
-
-def _load_config(config_path: Optional[str] = None) -> dict:
-    if config_path is None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        config_path = os.path.join(base_dir, "config", "config.json")
-    with open(config_path) as f:
-        return json.load(f)
 
 
 def load_plot_data(db_path: str, history_years: int = 10) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -106,7 +98,7 @@ def plot_forecasts(
     output_path: str = "gsl_forecast.png",
     history_years: int = 10,
 ) -> str:
-    config = _load_config(config_path)
+    config = load_config(config_path)
     actuals, forecasts = load_plot_data(config["database"]["path"], history_years)
 
     if forecasts.empty:
