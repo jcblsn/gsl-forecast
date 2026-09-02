@@ -251,7 +251,19 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", help="Directory for parquet and PNG outputs")
     parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument(
+        "--models", help="Comma-separated model names to evaluate (default: all registered)"
+    )
     args = parser.parse_args()
+    forecasters = None
+    if args.models:
+        wanted = set(args.models.split(","))
+        forecasters = [f for f in all_forecasters() if f.name in wanted]
+        unknown = wanted - {f.name for f in forecasters}
+        if unknown:
+            parser.error(f"Unknown models: {sorted(unknown)}")
+        if BASELINE not in wanted:
+            forecasters.append(next(f for f in all_forecasters() if f.name == BASELINE))
     run_cross_validation(
         config_path=args.config,
         n_cutoffs=args.n_cutoffs,
@@ -261,6 +273,7 @@ def main() -> None:
         experiment_db=args.experiment_db,
         seed=args.seed,
         output_dir=args.output_dir,
+        forecasters=forecasters,
         make_plots=not args.no_plots,
     )
 
