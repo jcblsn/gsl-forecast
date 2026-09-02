@@ -28,6 +28,7 @@ def all_forecasters() -> list[Forecaster]:
         ThetaForecaster(),
         SweRegressionForecaster(),
         InflowChainForecaster(),
+        InflowChainForecaster(level_term="area", name="inflow_chain_area"),
     ]
 
 

@@ -3,9 +3,9 @@
 Stage one predicts each future month's tributary inflow (kaf) from the snowpack known at
 the cutoff, by calendar month and lead. Stage two is a monthly bucket step fitted on history:
 the change in elevation from one month to the next as a function of that month's inflow and
-the starting elevation (which stands in for lake area, hence evaporation). The elevation is
-then rolled forward one month at a time. No bathymetry is used yet; the level term is the
-empirical stand-in for it.
+either the starting elevation (the default, an empirical stand-in for lake area) or, with
+`level_term="area"`, the lake area from the USGS hypsometry, so the evaporation term scales
+the way evaporation does. The elevation is then rolled forward one month at a time.
 """
 
 from datetime import date
@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
+from .. import hypsometry
 from ..base import Forecaster
 from .regression import TARGET_COL, TIME_COL, design, require_columns, ridge_fit
 
@@ -28,12 +29,14 @@ class InflowChainForecaster(Forecaster):
         snow_features: list[str] | None = None,
         min_obs: int = 10,
         alpha: float = 1e-3,
+        level_term: str = "level",
         name: str = "inflow_chain",
     ):
         super().__init__(name=name)
         self.snow_features = list(snow_features or DEFAULT_SNOW)
         self.min_obs = min_obs
         self.alpha = alpha
+        self.level_term = level_term
         self._data: pd.DataFrame | None = None
         self._step: dict[int, np.ndarray] = {}
 
@@ -51,12 +54,13 @@ class InflowChainForecaster(Forecaster):
             ]
         )
         inflow_next = df[INFLOW_COL].to_numpy(dtype=float)[1:]
+        state = self._state(y[:-1])
         dy = y[1:] - y[:-1]
         self._step = {}
         for m in range(1, 13):
             sel = consecutive & (months[1:] == m) & ~np.isnan(inflow_next)
             if sel.sum() >= self.min_obs:
-                X = np.column_stack([np.ones(sel.sum()), inflow_next[sel], y[:-1][sel]])
+                X = np.column_stack([np.ones(sel.sum()), inflow_next[sel], state[sel]])
                 self._step[m] = ridge_fit(X, dy[sel], self.alpha)
             else:
                 fallback = consecutive & (months[1:] == m)
@@ -64,6 +68,9 @@ class InflowChainForecaster(Forecaster):
         self._mean_inflow = df.groupby(df[TIME_COL].dt.month)[INFLOW_COL].mean().to_dict()
         self.is_fitted = True
         return self
+
+    def _state(self, level):
+        return hypsometry.area_km2(level) if self.level_term == "area" else level
 
     def inflow_forecast(self, h: int) -> float:
         """Stage one: the tributary inflow (kaf) predicted for lead h from the snowpack now."""
@@ -102,7 +109,7 @@ class InflowChainForecaster(Forecaster):
             if np.isnan(inflow):
                 level += b[0]
             else:
-                level += float(b[0] + b[1] * inflow + b[2] * level)
+                level += float(b[0] + b[1] * inflow + b[2] * self._state(level))
             preds.append(level)
         return pd.DataFrame(
             {
@@ -118,4 +125,5 @@ class InflowChainForecaster(Forecaster):
             "snow_features": ",".join(self.snow_features),
             "min_obs": self.min_obs,
             "alpha": self.alpha,
+            "level_term": self.level_term,
         }
