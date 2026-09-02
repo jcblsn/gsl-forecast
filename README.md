@@ -95,6 +95,14 @@ uv run gsl-benchmark [--headline outputs/headline_<stamp>.parquet] [--model ets_
 
 Prints the NRCS outlook record from `data/benchmarks/nrcs_outlooks.csv` (issue date, implied peak, actual peak) next to one fixed model's spring-peak forecast from the same issue date. NRCS actuals are daily peaks; ours are peaks of the monthly mean, so the last column rescores NRCS against the monthly-mean actual.
 
+### Hindcast from a past cutoff
+
+```bash
+uv run gsl-hindcast 2022-03 [--models swe_regression,ets_damped_s12] [--horizon 24] [--cv outputs/.../cv_results_<stamp>.parquet] [--output-dir outputs/<today>]
+```
+
+Fits the named models on data through the given month, charts their forecasts (with q05-q95 from other years' CV errors) against the observed monthly means, and writes `<YYYYMMDD>_gsl_hindcast.png` and `.csv` under `outputs/<today>/`. Prints MAE by lead block, the spring-peak forecast vs observed, and 90% coverage.
+
 ### Verify issued forecasts
 
 ```bash
@@ -216,6 +224,7 @@ src/
     quantiles.py        # Empirical intervals, pinball/CRPS, coverage
     benchmark.py        # gsl-benchmark: our peaks next to the NRCS record
     verify.py           # gsl-verify: score dated forecasts in forecasts/
+    hindcast.py         # gsl-hindcast: chart a past cutoff against observations
     multivariate/
       regression.py     # Ridge helper and column checks
       swe_regression.py
