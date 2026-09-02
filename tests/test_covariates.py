@@ -227,6 +227,11 @@ def test_climdiv_mean_of_divisions(db):
     assert db.execute("SELECT COUNT(*) FROM climdiv_monthly").fetchone()[0] == 4
 
 
+def test_climdiv_ingest_twice_replaces(db):
+    climate.ingest_climdiv(db, CFG["climdiv"])
+    assert db.execute("SELECT COUNT(*) FROM climdiv_monthly").fetchone()[0] == 4
+
+
 def test_climdiv_latest_file_and_parse():
     assert climate.latest_file(
         "x climdiv-tmpcdv-v1.0.0-20250101 climdiv-tmpcdv-v1.0.0-20250201", "tmpc"
