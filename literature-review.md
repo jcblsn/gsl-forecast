@@ -168,3 +168,9 @@ Over 2012-2025 our March-cutoff June MAE is 0.75 ft (ETS) and 0.76 ft (naive), w
 - Moon, Lall, Kwon (2007) full text for the SOI/PNA/CNP gain magnitude.
 - Gillies et al. (2015) full text for the ARX specification and lag orders.
 - NRCS WSOR PDFs (Jan-May 2024-2026) for the exact GSL inflow regression sites; curl to nrcs.usda.gov is blocked from this sandbox.
+
+## 11. Where this project can add value
+
+- The NRCS outlook stops in May, so no operational product forecasts the water-year-end (autumn) low, which is where salinity and brine-shrimp stress peak and what the Strike Team and Commissioner's statements target.
+- Nothing dated and versioned exists between the spring outlook (1-6 months) and the 30-year scenario models. A 6-24 month probabilistic elevation forecast that combines NRCS or CBRFC inflow exceedances with an explicit water-balance evaporation term, runs year-round, and is scored against the USGS gauge would be the first of its kind rather than merely competitive.
+- Policy thresholds are all in south-arm elevation (4,198 ft healthy minimum, 4,192 ft serious adverse effects, 4,188.5 ft 2022 record low), so elevation stays the primary target and area and volume remain lookups.
