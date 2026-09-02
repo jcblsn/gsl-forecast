@@ -167,6 +167,9 @@ cython_debug/
 
 data/
 .context/
+outputs/
+*.png
+*.parquet
 
 # Database files
 *.db

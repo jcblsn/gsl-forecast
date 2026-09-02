@@ -5,20 +5,35 @@ from unittest.mock import patch
 import duckdb
 import pytest
 
-from src.pipeline.elt import ingest_daily, transform, run_pipeline
-
+from src.pipeline.elt import ingest_daily, run_pipeline, transform
 
 SAMPLE_DAILY_RESPONSE = {
     "value": {
-        "timeSeries": [{
-            "values": [{
-                "value": [
-                    {"dateTime": "2022-01-01T00:00:00", "value": "4195.5", "qualifiers": ["P"]},
-                    {"dateTime": "2022-01-15T00:00:00", "value": "4196.0", "qualifiers": ["P"]},
-                    {"dateTime": "2022-02-01T00:00:00", "value": "4196.5", "qualifiers": ["A"]},
+        "timeSeries": [
+            {
+                "values": [
+                    {
+                        "value": [
+                            {
+                                "dateTime": "2022-01-01T00:00:00",
+                                "value": "4195.5",
+                                "qualifiers": ["P"],
+                            },
+                            {
+                                "dateTime": "2022-01-15T00:00:00",
+                                "value": "4196.0",
+                                "qualifiers": ["P"],
+                            },
+                            {
+                                "dateTime": "2022-02-01T00:00:00",
+                                "value": "4196.5",
+                                "qualifiers": ["A"],
+                            },
+                        ]
+                    }
                 ]
-            }]
-        }]
+            }
+        ]
     }
 }
 
@@ -38,8 +53,10 @@ def _mock_requests_get(response_json):
     class MockResponse:
         def json(self):
             return response_json
+
         def raise_for_status(self):
             pass
+
     return MockResponse()
 
 
@@ -64,9 +81,9 @@ class TestIngestDaily:
         ingest_daily(conn, DAILY_SOURCE_CONFIG)
         ingest_daily(conn, DAILY_SOURCE_CONFIG)
 
-        count = conn.execute(
-            "SELECT COUNT(*) FROM usgs_water_surface_elevation_daily"
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM usgs_water_surface_elevation_daily").fetchone()[
+            0
+        ]
         assert count == 3
 
     @patch("requests.get")
@@ -88,26 +105,44 @@ class TestIngestDaily:
 
         ingest_daily(conn, DAILY_SOURCE_CONFIG)
 
-        count = conn.execute(
-            "SELECT COUNT(*) FROM usgs_water_surface_elevation_daily"
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM usgs_water_surface_elevation_daily").fetchone()[
+            0
+        ]
         assert count == 0
 
     @patch("requests.get")
     def test_skips_invalid_elevation_values(self, mock_get, conn):
         response = {
-            "value": {"timeSeries": [{"values": [{"value": [
-                {"dateTime": "2022-01-01T00:00:00", "value": "not_a_number", "qualifiers": ["P"]},
-                {"dateTime": "2022-01-02T00:00:00", "value": "4196.0", "qualifiers": ["P"]},
-            ]}]}]}
+            "value": {
+                "timeSeries": [
+                    {
+                        "values": [
+                            {
+                                "value": [
+                                    {
+                                        "dateTime": "2022-01-01T00:00:00",
+                                        "value": "not_a_number",
+                                        "qualifiers": ["P"],
+                                    },
+                                    {
+                                        "dateTime": "2022-01-02T00:00:00",
+                                        "value": "4196.0",
+                                        "qualifiers": ["P"],
+                                    },
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
         }
         mock_get.return_value = _mock_requests_get(response)
 
         ingest_daily(conn, DAILY_SOURCE_CONFIG)
 
-        count = conn.execute(
-            "SELECT COUNT(*) FROM usgs_water_surface_elevation_daily"
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM usgs_water_surface_elevation_daily").fetchone()[
+            0
+        ]
         assert count == 1
 
 
@@ -142,7 +177,9 @@ class TestTransform:
                 d DATE PRIMARY KEY, elevation FLOAT, qualifiers VARCHAR
             )
         """)
-        conn.execute("INSERT INTO usgs_water_surface_elevation_daily VALUES ('2022-01-01', 4195.0, 'P')")
+        conn.execute(
+            "INSERT INTO usgs_water_surface_elevation_daily VALUES ('2022-01-01', 4195.0, 'P')"
+        )
 
         transform(conn)
         transform(conn)  # should not error
@@ -183,7 +220,9 @@ class TestRunPipeline:
 
     @patch("src.pipeline.elt.ingest_continuous")
     @patch("src.pipeline.elt.ingest_daily")
-    def test_pipeline_rolls_back_on_error(self, mock_ingest_daily, mock_ingest_continuous, tmp_path):
+    def test_pipeline_rolls_back_on_error(
+        self, mock_ingest_daily, mock_ingest_continuous, tmp_path
+    ):
         mock_ingest_daily.side_effect = Exception("fetch failed")
 
         config = {
@@ -199,3 +238,19 @@ class TestRunPipeline:
 
         with pytest.raises(Exception, match="fetch failed"):
             run_pipeline(config_path)
+
+
+class TestRdbValueColumns:
+    def test_selects_by_parameter_code(self):
+        from src.pipeline.elt import rdb_value_columns
+
+        cols = ["agency_cd", "site_no", "datetime", "tz_cd", "144241_62614", "144241_62614_cd"]
+        assert rdb_value_columns(cols, "62614") == ("144241_62614", "144241_62614_cd")
+
+    def test_raises_when_missing(self):
+        import pytest
+
+        from src.pipeline.elt import rdb_value_columns
+
+        with pytest.raises(RuntimeError, match="62614"):
+            rdb_value_columns(["agency_cd", "site_no", "datetime"], "62614")

@@ -1,7 +1,7 @@
+import argparse
 import logging
 import os
 from datetime import datetime
-from typing import Optional
 
 import duckdb
 import requests
@@ -39,23 +39,40 @@ def ingest_continuous(conn: duckdb.DuckDBPyConnection, source_config: dict) -> N
     logging.info(f"Fetching continuous USGS data from {start_date.date()} to {end_date.date()}")
     conn.execute("SET force_download=true")
     conn.execute(f"""
+        CREATE OR REPLACE TEMP VIEW _usgs_iv_raw AS
+        SELECT * FROM read_csv_auto('{url}', delim='\t', skip=1, comment='#', header=true)
+    """)
+    value_col, qual_col = rdb_value_columns(
+        [row[0] for row in conn.execute("DESCRIBE _usgs_iv_raw").fetchall()],
+        source_config.get("parameter_code", "62614"),
+    )
+    conn.execute(f"""
         INSERT OR IGNORE INTO {table}
         SELECT
             agency_cd AS agency,
             site_no AS site,
             CAST(datetime || ':00' AS TIMESTAMP) AS dt,
             tz_cd AS tz,
-            CAST("144241_62614" AS FLOAT) AS elevation,
-            "144241_62614_cd" AS qualifiers
-        FROM read_csv_auto(
-            '{url}',
-            delim='\t',
-            skip=1,
-            comment='#',
-            header=true
-        )
+            CAST("{value_col}" AS FLOAT) AS elevation,
+            "{qual_col}" AS qualifiers
+        FROM _usgs_iv_raw
         WHERE datetime IS NOT NULL AND datetime != '20d'
     """)
+    conn.execute("DROP VIEW _usgs_iv_raw")
+
+
+def rdb_value_columns(columns: list[str], parameter_code: str) -> tuple[str, str]:
+    """USGS RDB value columns are named <timeseries_id>_<parameter_code>; the timeseries id
+    is an internal identifier that can change, so select by parameter code suffix."""
+    values = [c for c in columns if c.endswith(f"_{parameter_code}")]
+    if len(values) != 1:
+        raise RuntimeError(
+            f"Expected one column ending in _{parameter_code}, found {values} in {columns}"
+        )
+    qual = f"{values[0]}_cd"
+    if qual not in columns:
+        raise RuntimeError(f"Missing qualifier column {qual} in {columns}")
+    return values[0], qual
 
 
 def ingest_daily(conn: duckdb.DuckDBPyConnection, source_config: dict) -> None:
@@ -129,10 +146,8 @@ def transform(conn: duckdb.DuckDBPyConnection) -> None:
     """)
 
 
-def run_pipeline(config_path: Optional[str] = None) -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+def run_pipeline(config_path: str | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     config = load_config(config_path)
     db_path = config["database"]["path"]
@@ -156,5 +171,12 @@ def run_pipeline(config_path: Optional[str] = None) -> None:
             raise
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Fetch USGS data into the local DuckDB")
+    parser.add_argument("--config", help="Path to config file")
+    args = parser.parse_args()
+    run_pipeline(args.config)
+
+
 if __name__ == "__main__":
-    run_pipeline()
+    main()

@@ -1,11 +1,10 @@
 import argparse
-from typing import Dict, Optional
 
 import pandas as pd
 from experiment_tracker import ExperimentTracker
 
 
-def get_run_metrics(tracker: ExperimentTracker, run_id: int) -> Optional[Dict]:
+def get_run_metrics(tracker: ExperimentTracker, run_id: int) -> dict | None:
     try:
         model = tracker.get_model(run_id)
         metrics = tracker.get_metrics(run_id)
@@ -15,9 +14,7 @@ def get_run_metrics(tracker: ExperimentTracker, run_id: int) -> Optional[Dict]:
         return None
 
 
-def create_metrics_summary(
-    tracker: ExperimentTracker, experiment_id: int
-) -> Optional[pd.DataFrame]:
+def create_metrics_summary(tracker: ExperimentTracker, experiment_id: int) -> pd.DataFrame | None:
     runs = tracker.get_run_history(experiment_id)
     metrics_list = [get_run_metrics(tracker, run["run_id"]) for run in runs]
     metrics_list = [m for m in metrics_list if m is not None]
@@ -30,7 +27,7 @@ def create_metrics_summary(
 
 def view_experiment(
     experiment_id: int, experiment_db: str = "forecast_experiments.db"
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     tracker = ExperimentTracker(experiment_db)
     experiment = tracker.get_experiment(experiment_id)
 
@@ -50,12 +47,15 @@ def view_experiment(
     return metrics_df
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description="View experiment results")
-    parser.add_argument("--experiment_id", type=int, help="Experiment ID to view")
+    parser.add_argument("experiment_id", type=int, help="Experiment ID to view")
     parser.add_argument(
         "--db", default="forecast_experiments.db", help="Path to experiment database"
     )
-
     args = parser.parse_args()
     view_experiment(args.experiment_id, args.db)
+
+
+if __name__ == "__main__":
+    main()

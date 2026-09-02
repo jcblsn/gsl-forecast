@@ -13,16 +13,18 @@ dependencies = [
     "experiment-tracker",
     "pandas>=2.2.3",
     "plotnine>=0.14.0",
+    "pyarrow>=17.0.0",
     "python-dateutil>=2.9.0",
     "requests>=2.32.3",
     "statsmodels>=0.14.0",
 ]
 
 [project.scripts]
-gsl-pipeline = "src.pipeline.elt:run_pipeline"
-gsl-forecast = "src.forecasting.run_forecast:run_forecasts"
-gsl-plot = "src.forecasting.plot_forecasts:plot_forecasts"
-gsl-cv = "src.forecasting.cross_validate:run_cross_validation"
+gsl-pipeline = "src.pipeline.elt:main"
+gsl-forecast = "src.forecasting.run_forecast:main"
+gsl-plot = "src.forecasting.plot_forecasts:main"
+gsl-cv = "src.forecasting.cross_validate:main"
+gsl-results = "src.forecasting.view_results:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -32,10 +34,18 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.uv.sources]
-experiment-tracker = { git = "https://github.com/jcblsn/experiment-tracker.git", rev = "main" }
+experiment-tracker = { git = "https://github.com/jcblsn/experiment-tracker.git", rev = "348945b0a1d533f6c37bd4f189cdb88cc8f2cd3c" }
 
 [dependency-groups]
 dev = [
     "ipykernel>=6.29.5",
     "pytest>=8.3.4",
+    "ruff>=0.6.0",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
