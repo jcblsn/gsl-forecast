@@ -1,6 +1,8 @@
 import argparse
+import json
 import logging
 import os
+from datetime import date
 
 import duckdb
 import pandas as pd
@@ -12,9 +14,38 @@ from src.forecasting.data import load_monthly_data
 from src.forecasting.quantiles import apply_intervals, error_quantiles
 from src.forecasting.registry import production_forecasters
 
+REQUIRED_COVARIATES = ("swe_eom_gsl", "prec_wy_eom_gsl")
+MIN_OBS_DAYS = 28
 
-def load_training_data(conn: duckdb.DuckDBPyConnection, train_start: str | None) -> pd.DataFrame:
-    return load_monthly_data(conn, train_start)
+
+def data_status(db_path: str) -> tuple[dict, list[str]]:
+    """Describe the data vintage at the cutoff and list anything that would degrade the
+    forecast silently: a stale series, a thin last month, or null covariates."""
+    df = load_monthly_data(db_path)
+    last = df.iloc[-1]
+    with duckdb.connect(db_path, read_only=True) as conn:
+        n_obs = conn.execute(
+            "SELECT observation_count FROM monthly_elevation WHERE month = ?", [last["month"]]
+        ).fetchone()[0]
+    missing = [c for c in REQUIRED_COVARIATES if c not in df or pd.isna(last[c])]
+    n_sites = last.get("n_snotel_sites")
+    meta = {
+        "data_max": str(last["month"].date()),
+        "observation_count": int(n_obs),
+        "n_snotel_sites": None if pd.isna(n_sites) else int(n_sites),
+        "missing_covariates": missing,
+    }
+    problems = []
+    if n_obs < MIN_OBS_DAYS:
+        problems.append(f"only {n_obs} daily readings in {meta['data_max']}")
+    if missing:
+        problems.append(f"null at cutoff: {missing}")
+    return meta, problems
+
+
+def previous_month() -> date:
+    first = date.today().replace(day=1)
+    return (first - pd.DateOffset(months=1)).date()
 
 
 def ensure_forecasts_table(conn: duckdb.DuckDBPyConnection) -> None:
@@ -107,7 +138,7 @@ def run_forecasts(
     all_predictions = []
     with duckdb.connect(config["database"]["path"]) as conn:
         ensure_forecasts_table(conn)
-        train_df = load_training_data(conn, train_start)
+        train_df = load_monthly_data(conn, train_start)
         data_min, data_max = train_df["month"].min().date(), train_df["month"].max().date()
         for k, v in {
             "data_min": str(data_min),
@@ -133,9 +164,13 @@ def run_forecasts(
 
 
 def export_forecasts(
-    predictions: pd.DataFrame, path: str, cv_parquet: str | None = None
+    predictions: pd.DataFrame,
+    path: str,
+    cv_parquet: str | None = None,
+    meta: dict | None = None,
 ) -> pd.DataFrame:
-    """Write one dated forecast file: issue month, target month, lead, model, point, intervals."""
+    """Write one dated forecast file: issue month, target month, lead, model, point, intervals.
+    With `meta`, a sidecar <path stem>.meta.json records the data vintage behind it."""
     out = predictions.rename(columns={"model_name": "model"})[["month", "model", "pred"]].copy()
     out["month"] = pd.to_datetime(out["month"])
     origin = out["month"].min() - pd.DateOffset(months=1)
@@ -151,6 +186,9 @@ def export_forecasts(
     out["month"] = out["month"].dt.date
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     out.to_csv(path, index=False, float_format="%.3f")
+    if meta:
+        with open(os.path.splitext(path)[0] + ".meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
     logging.info(f"Exported {len(out)} rows to {path}")
     return out
 
@@ -165,7 +203,20 @@ def main() -> None:
         "--export", help="CSV path for the dated forecast, e.g. forecasts/2026-09.csv"
     )
     parser.add_argument("--intervals", help="cv_results parquet used for empirical intervals")
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Issue even if the last month is thin or covariates are null at the cutoff",
+    )
     args = parser.parse_args()
+    config = load_config(args.config)
+    meta, problems = data_status(config["database"]["path"])
+    if meta["data_max"] != str(previous_month()):
+        raise SystemExit(f"Data end {meta['data_max']}, not last month; run gsl-pipeline first")
+    if problems and not args.allow_incomplete:
+        raise SystemExit("Refusing to issue: " + "; ".join(problems) + " (--allow-incomplete)")
+    for p in problems:
+        logging.warning(f"Issuing with incomplete data: {p}")
     preds = run_forecasts(
         config_path=args.config,
         horizon=args.horizon,
@@ -173,7 +224,7 @@ def main() -> None:
         train_start=args.train_start,
     )
     if args.export and not preds.empty:
-        export_forecasts(preds, args.export, args.intervals)
+        export_forecasts(preds, args.export, args.intervals, meta)
 
 
 if __name__ == "__main__":

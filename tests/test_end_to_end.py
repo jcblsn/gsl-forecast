@@ -124,3 +124,17 @@ def test_cli_help_exits_cleanly(module):
     )
     assert result.returncode == 0, result.stderr
     assert "usage:" in result.stdout
+
+
+def test_data_status_flags_thin_month_and_null_covariates(project):
+    from src.forecasting.run_forecast import data_status
+
+    meta, problems = data_status(project["db_path"])
+    assert meta["data_max"] == "2019-12-01" and meta["observation_count"] == 30
+    assert problems == ["null at cutoff: ['swe_eom_gsl', 'prec_wy_eom_gsl']"]
+    with duckdb.connect(project["db_path"]) as conn:
+        conn.execute(
+            "UPDATE monthly_elevation SET observation_count = 3 WHERE month = '2019-12-01'"
+        )
+    _, problems = data_status(project["db_path"])
+    assert problems[0].startswith("only 3 daily readings")

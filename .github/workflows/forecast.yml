@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: forecast
+  cancel-in-progress: false
+
 jobs:
   forecast:
     runs-on: ubuntu-latest
@@ -17,12 +21,19 @@ jobs:
       - run: uv sync --frozen
       - run: uv run --frozen gsl-pipeline
       - run: uv run --frozen gsl-cv --no-plots
-      - name: Forecast and verify
+      - name: Forecast
+        id: forecast
+        continue-on-error: true
         run: |
-          stamp=$(date -u +%Y-%m)
           cv=$(ls -t outputs/cv_results_*.parquet | head -1)
-          uv run --frozen gsl-forecast --export forecasts/$stamp.csv --intervals "$cv"
-          uv run --frozen gsl-verify
+          uv run --frozen gsl-forecast --export forecasts/$(date -u +%Y-%m).csv --intervals "$cv"
+      - name: Forecast with incomplete covariates
+        if: steps.forecast.outcome == 'failure'
+        run: |
+          cv=$(ls -t outputs/cv_results_*.parquet | head -1)
+          uv run --frozen gsl-forecast --allow-incomplete \
+            --export forecasts/$(date -u +%Y-%m).csv --intervals "$cv"
+      - run: uv run --frozen gsl-verify
       - name: Commit dated forecast
         run: |
           git config user.name "github-actions[bot]"
