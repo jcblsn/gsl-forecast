@@ -1,4 +1,6 @@
 from src.forecasting.base import Forecaster
+from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
+from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 from src.forecasting.univariate.drift import DriftForecaster
 from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
 from src.forecasting.univariate.moving_average import MovingAverageForecaster
@@ -24,6 +26,8 @@ def all_forecasters() -> list[Forecaster]:
         HoltWintersForecaster(trend="add", seasonal="add", seasonal_periods=12, damped_trend=False),
         HoltWintersForecaster(trend="add", seasonal="add", seasonal_periods=12, damped_trend=True),
         ThetaForecaster(),
+        SweRegressionForecaster(),
+        InflowChainForecaster(),
     ]
 
 
@@ -35,6 +39,8 @@ PRODUCTION_MODELS = {
     "ets_add_s12",
     "ets_damped_noseas",
     "theta",
+    "swe_regression",
+    "inflow_chain",
 }
 
 

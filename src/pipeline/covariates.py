@@ -99,19 +99,21 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
     )
     logging.info(f"{len(sites)} SNOTEL sites in the GSL basins")
 
-    max_d = conn.execute("SELECT MAX(d) FROM snotel_daily").fetchone()[0]
-    start = cfg["start"] if max_d is None else str(max_d - timedelta(days=7))
     end = datetime.now().strftime("%Y-%m-%d")
     triplets = [s["station_triplet"] for s in sites]
     total = 0
     for i, triplet in enumerate(triplets, start=1):
+        max_d = conn.execute(
+            "SELECT MAX(d) FROM snotel_daily WHERE station_triplet = ?", [triplet]
+        ).fetchone()[0]
+        start = cfg["start"] if max_d is None else str(max_d - timedelta(days=7))
         rows = fetch_snotel_daily([triplet], start, end)
         conn.executemany(
             "INSERT OR REPLACE INTO snotel_daily VALUES (?, CAST(? AS DATE), ?, ?)", rows
         )
         total += len(rows)
-        logging.info(f"SNOTEL {i}/{len(triplets)} {triplet}: {len(rows)} rows")
-    logging.info(f"Upserted {total} SNOTEL daily rows from {start}")
+        logging.info(f"SNOTEL {i}/{len(triplets)} {triplet}: {len(rows)} rows from {start}")
+    logging.info(f"Upserted {total} SNOTEL daily rows")
 
 
 def fetch_usgs_daily(url: str) -> list[tuple[str, float, str]]:

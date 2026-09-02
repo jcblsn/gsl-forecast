@@ -7,15 +7,12 @@ from experiment_tracker import ExperimentTracker
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
+from src.forecasting.data import load_monthly_data
 from src.forecasting.registry import production_forecasters
 
 
 def load_training_data(conn: duckdb.DuckDBPyConnection, train_start: str | None) -> pd.DataFrame:
-    df = conn.execute("SELECT * FROM monthly_elevation ORDER BY month").fetchdf()
-    df["month"] = pd.to_datetime(df["month"])
-    if train_start:
-        df = df[df["month"] >= pd.Timestamp(train_start)].reset_index(drop=True)
-    return df
+    return load_monthly_data(conn, train_start)
 
 
 def ensure_forecasts_table(conn: duckdb.DuckDBPyConnection) -> None:

@@ -3,13 +3,13 @@ import logging
 import os
 import random
 
-import duckdb
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 from experiment_tracker import ExperimentTracker
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
+from src.forecasting.data import load_monthly_data
 from src.forecasting.headline import (
     headline_metrics,
     headline_scores,
@@ -17,15 +17,6 @@ from src.forecasting.headline import (
     summarize_headline,
 )
 from src.forecasting.registry import BASELINE, all_forecasters
-
-
-def load_monthly_data(db_path: str) -> pd.DataFrame:
-    with duckdb.connect(db_path, read_only=True) as conn:
-        df = conn.execute(
-            "SELECT month, avg_elevation FROM monthly_elevation ORDER BY month"
-        ).fetchdf()
-    df["month"] = pd.to_datetime(df["month"])
-    return df
 
 
 def valid_cutoffs(data: pd.DataFrame, history_years: int, horizon: int) -> list[pd.Timestamp]:
