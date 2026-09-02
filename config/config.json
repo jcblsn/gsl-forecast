@@ -2,7 +2,8 @@
   "sources": {
     "usgs_water_surface_elevation_continuous": {
       "url": "https://waterservices.usgs.gov/nwis/iv/?sites={site}&agencyCd=USGS&parameterCd=62614&format=rdb&startDT={start}&endDT={end}",
-      "site_id": "10010100"
+      "site_id": "10010100",
+      "parameter_code": "62614"
     },
     "usgs_water_surface_elevation_daily": {
       "url": "https://waterservices.usgs.gov/nwis/dv?format=json&siteStatus=all&site={site}&agencyCd=USGS&statCd=00003&parameterCd=62614&startDT={start}&endDT={end}",
@@ -11,5 +12,15 @@
   },
   "database": {
     "path": "./data/gsl.db"
+  },
+  "forecasting": {
+    "train_start": "1960-01-01",
+    "horizon": 12,
+    "experiment_db": "forecast_experiments.db",
+    "output_dir": "./outputs",
+    "cv": {
+      "history_years": 15,
+      "cutoffs": "all"
+    }
   }
 }

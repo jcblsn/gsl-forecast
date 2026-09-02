@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Dict, Literal, Optional, Self
+from typing import Literal, Self
 
 import numpy as np
 import pandas as pd
@@ -26,9 +26,7 @@ class MovingAverageForecaster(Forecaster):
 
     def fit(self, data: pd.DataFrame) -> Self:
         if self.time_col not in data.columns or self.target_col not in data.columns:
-            raise ValueError(
-                f"Data must contain '{self.time_col}' and '{self.target_col}' columns"
-            )
+            raise ValueError(f"Data must contain '{self.time_col}' and '{self.target_col}' columns")
 
         if len(data) < self.window:
             raise ValueError(f"Data must contain at least {self.window} observations")
@@ -49,7 +47,7 @@ class MovingAverageForecaster(Forecaster):
         self.is_fitted = True
         return self
 
-    def predict(self, h: int, start_date: Optional[date] = None) -> pd.DataFrame:
+    def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
 
@@ -68,5 +66,5 @@ class MovingAverageForecaster(Forecaster):
             }
         )
 
-    def get_metrics(self) -> Dict[str, float]:
+    def get_metrics(self) -> dict[str, float]:
         return {"method": self.method, "window": self.window}

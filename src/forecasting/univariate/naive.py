@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Dict, Optional, Self
+from typing import Self
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
@@ -24,9 +24,7 @@ class NaiveForecaster(Forecaster):
 
     def fit(self, data: pd.DataFrame) -> Self:
         if self.time_col not in data.columns or self.target_col not in data.columns:
-            raise ValueError(
-                f"Data must contain '{self.time_col}' and '{self.target_col}' columns"
-            )
+            raise ValueError(f"Data must contain '{self.time_col}' and '{self.target_col}' columns")
 
         data = data.sort_values(self.time_col)
         self.last_date = data[self.time_col].max()
@@ -45,7 +43,7 @@ class NaiveForecaster(Forecaster):
         self.is_fitted = True
         return self
 
-    def predict(self, h: int, start_date: Optional[date] = None) -> pd.DataFrame:
+    def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
 
@@ -55,9 +53,7 @@ class NaiveForecaster(Forecaster):
         if self.method == "last":
             predictions = [self.last_obs] * h
         else:  # seasonal method
-            predictions = [
-                self.last_obs[(i - 1) % self.seasonal_period] for i in range(1, h + 1)
-            ]
+            predictions = [self.last_obs[(i - 1) % self.seasonal_period] for i in range(1, h + 1)]
 
         return pd.DataFrame(
             {
@@ -68,5 +64,5 @@ class NaiveForecaster(Forecaster):
             }
         )
 
-    def get_metrics(self) -> Dict[str, float]:
+    def get_metrics(self) -> dict[str, float]:
         return {"method": self.method, "seasonal_period": self.seasonal_period}

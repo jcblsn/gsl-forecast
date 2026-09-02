@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Self
 
 import numpy as np
@@ -9,14 +10,14 @@ from ..base import Forecaster
 
 
 class ThetaForecaster(Forecaster):
-    """Theta method (Assimakopoulos & Nikolopoulos, 2000).
+    """Standard theta method (Assimakopoulos & Nikolopoulos 2000; Hyndman & Billah 2003).
 
-    Forecast = average of:
-      - theta_0: linear OLS trend extrapolated h steps
-      - theta_2: SES forecast (captures level + recent movement)
-
-    This combination is equivalent to SES + half the long-run linear slope,
-    which naturally dampens the trend contribution relative to pure drift.
+    Equivalent to SES with drift equal to half the OLS trend slope:
+        y_hat(h) = SES(h) + (b / 2) * (h - 1 + 1/alpha)
+    The SES component anchors the forecast at the current level; the drift term
+    carries half the long-run slope. Averaging SES with the raw OLS line (a common
+    mis-reading of the method) would instead anchor the forecast at the regression
+    line, which can sit far from the current level on a non-stationary series.
     """
 
     def __init__(self, time_col: str = "month", target_col: str = "avg_elevation"):
@@ -27,42 +28,39 @@ class ThetaForecaster(Forecaster):
     def fit(self, data: pd.DataFrame) -> Self:
         data = data.sort_values(self.time_col)
         vals = data[self.target_col].values.astype(float)
-        n = len(vals)
         self.last_date = data[self.time_col].max()
 
-        # OLS linear trend: vals ~ a + b*t, t=1..n
-        t = np.arange(1, n + 1)
-        b, a = np.polyfit(t, vals, 1)
-        self._trend_intercept = a
-        self._trend_slope = b
-        self._n = n
+        t = np.arange(1, len(vals) + 1)
+        self._trend_slope, _ = np.polyfit(t, vals, 1)
 
-        # SES fit
-        ses = SimpleExpSmoothing(vals, initialization_method="estimated").fit(optimized=True)
-        self._ses = ses
+        self._ses = SimpleExpSmoothing(vals, initialization_method="estimated").fit(optimized=True)
+        self._alpha = float(self._ses.params["smoothing_level"])
 
         self.is_fitted = True
         return self
 
-    def predict(self, h: int, start_date=None) -> pd.DataFrame:
+    def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
         origin = start_date or self.last_date
         dates = [origin + relativedelta(months=i) for i in range(1, h + 1)]
 
-        ses_preds = self._ses.forecast(h)
-        trend_preds = [
-            self._trend_intercept + self._trend_slope * (self._n + i)
-            for i in range(1, h + 1)
-        ]
-        preds = [(s + t) / 2 for s, t in zip(ses_preds, trend_preds)]
+        ses_preds = np.asarray(self._ses.forecast(h))
+        steps = np.arange(1, h + 1)
+        alpha = max(self._alpha, 1e-6)
+        drift = (self._trend_slope / 2.0) * (steps - 1 + 1.0 / alpha)
+        preds = ses_preds + drift
 
-        return pd.DataFrame({
-            self.time_col: dates,
-            "target": self.target_col,
-            "pred": preds,
-            "model_name": self.name,
-        })
+        return pd.DataFrame(
+            {
+                self.time_col: dates,
+                "target": self.target_col,
+                "pred": preds.tolist(),
+                "model_name": self.name,
+            }
+        )
 
     def get_metrics(self):
-        return {"alpha": float(self._ses.params["smoothing_level"]) if self.is_fitted else None}
+        if not self.is_fitted:
+            return {"alpha": None, "slope": None}
+        return {"alpha": self._alpha, "slope": float(self._trend_slope)}

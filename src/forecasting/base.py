@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Self
+from datetime import date
+from typing import Self
 
 import pandas as pd
 
@@ -14,8 +15,9 @@ class Forecaster(ABC):
         pass
 
     @abstractmethod
-    def predict(self, h: int) -> pd.DataFrame:
-        pass
+    def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
+        """Return a DataFrame with columns [time_col, target, pred, model_name] for h steps
+        after start_date (defaults to the last fitted date)."""
 
-    def get_metrics(self) -> Dict[str, float]:
+    def get_metrics(self) -> dict[str, object]:
         return {}

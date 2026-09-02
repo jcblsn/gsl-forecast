@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Self
+from typing import Self
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
@@ -10,7 +10,9 @@ from ..base import Forecaster
 class DriftForecaster(Forecaster):
     """Project the average slope over the last `window` months forward."""
 
-    def __init__(self, window: int = 24, time_col: str = "month", target_col: str = "avg_elevation"):
+    def __init__(
+        self, window: int = 24, time_col: str = "month", target_col: str = "avg_elevation"
+    ):
         super().__init__(name=f"drift_{window}m")
         self.window = window
         self.time_col = time_col
@@ -39,12 +41,14 @@ class DriftForecaster(Forecaster):
         origin = start_date or self.last_date
         dates = [origin + relativedelta(months=i) for i in range(1, h + 1)]
         preds = [self.last_value + i * self.slope for i in range(1, h + 1)]
-        return pd.DataFrame({
-            self.time_col: dates,
-            "target": self.target_col,
-            "pred": preds,
-            "model_name": self.name,
-        })
+        return pd.DataFrame(
+            {
+                self.time_col: dates,
+                "target": self.target_col,
+                "pred": preds,
+                "model_name": self.name,
+            }
+        )
 
     def get_metrics(self):
         return {"window": self.window}

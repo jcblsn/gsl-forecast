@@ -1,11 +1,24 @@
 import json
 import os
-from typing import Optional
+
+DEFAULTS = {
+    "forecasting": {
+        "train_start": None,
+        "horizon": 12,
+        "experiment_db": "forecast_experiments.db",
+        "output_dir": "./outputs",
+        "cv": {"history_years": 15, "cutoffs": "all"},
+    }
+}
 
 
-def load_config(config_path: Optional[str] = None) -> dict:
+def load_config(config_path: str | None = None) -> dict:
     if config_path is None:
         base_dir = os.path.dirname(os.path.dirname(__file__))
         config_path = os.path.join(base_dir, "config", "config.json")
     with open(config_path) as f:
-        return json.load(f)
+        config = json.load(f)
+    fc = {**DEFAULTS["forecasting"], **config.get("forecasting", {})}
+    fc["cv"] = {**DEFAULTS["forecasting"]["cv"], **fc.get("cv", {})}
+    config["forecasting"] = fc
+    return config

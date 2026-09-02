@@ -1,4 +1,4 @@
-from typing import Optional, Self
+from typing import Self
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
@@ -17,8 +17,8 @@ class HoltWintersForecaster(Forecaster):
 
     def __init__(
         self,
-        trend: Optional[str] = "add",
-        seasonal: Optional[str] = "add",
+        trend: str | None = "add",
+        seasonal: str | None = "add",
         seasonal_periods: int = 12,
         damped_trend: bool = False,
         time_col: str = "month",
@@ -61,12 +61,14 @@ class HoltWintersForecaster(Forecaster):
         origin = start_date or self.last_date
         dates = [origin + relativedelta(months=i) for i in range(1, h + 1)]
         preds = self._result.forecast(h).tolist()
-        return pd.DataFrame({
-            self.time_col: dates,
-            "target": self.target_col,
-            "pred": preds,
-            "model_name": self.name,
-        })
+        return pd.DataFrame(
+            {
+                self.time_col: dates,
+                "target": self.target_col,
+                "pred": preds,
+                "model_name": self.name,
+            }
+        )
 
     def get_metrics(self):
         return {
