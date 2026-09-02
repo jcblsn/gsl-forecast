@@ -1,6 +1,38 @@
 # GSL Forecast
 
-Forecasting the Great Salt Lake's water surface elevation using historical USGS gauge data.
+A dated, verified, year-round forecast of the Great Salt Lake's water surface elevation.
+
+## Goal
+
+Build the best live, continuously operationalized forecast of Great Salt Lake south-arm elevation (USGS gauge 10010000 at Saltair, feet): a dated, versioned, probabilistic monthly forecast for months 1-24 from the present that combines a univariate baseline with snowpack and streamflow covariates and an explicit water balance, runs every month of the year, and is scored publicly against the gauge as observations arrive.
+
+Two scalars carry most of the decision weight and are the headline targets:
+
+- Spring peak elevation (the April-June maximum of the monthly mean)
+- Water-year-end elevation (the September mean, the annual low)
+
+Horizons: 1-6 months is the operational window where snowpack makes the lake predictable; 6-24 months is the gap no one currently fills.
+
+## Why
+
+A survey of existing forecasts is in `operational-forecasts-survey.md`. In short:
+
+- The only routine, dated product that targets lake elevation is the NRCS Utah Snow Survey's advisory rise-to-peak outlook, issued January through May since 2024. Its April-issue peak error was 0.1-0.4 ft in 2024-2026 against a stated band of about plus or minus half a foot. It stops in May, so nothing operational forecasts the autumn low or anything beyond six months.
+- CBRFC issues ensemble streamflow forecasts for the tributaries (about 16-18% April error on April-July volume) but no lake product.
+- Long-range models (USU Climate Center's climate-oscillation regression, the Strike Team's 30-year Monte Carlo, the state's GSLIM planning model) are scenario tools or multi-year statistical forecasts with roughly 3 ft RMSE at 8 years, and none is verified as a dated forecast.
+
+The benchmark to beat in season is the NRCS outlook; out of season the benchmark is our own univariate model, which from a winter cutoff does no better than repeating the last value (see [Current results](#current-results)).
+
+## Roadmap
+
+- [x] Univariate baselines with walk-forward CV and experiment tracking
+- [x] Survey of operational and gray-literature forecasts
+- [ ] Score the headline scalars (spring peak, water-year-end low) by issue month and place them next to the NRCS record in `data/benchmarks/`
+- [ ] Ingest covariates: SNOTEL basin snow water equivalent and precipitation, USGS inflow gauges (Bear 10127110, Weber 10141000, Jordan 10170490), issued NRCS/CBRFC inflow forecasts
+- [ ] Multivariate models: SWE regression (the NRCS method), ETS with regressors, monthly water balance with quantile paths
+- [ ] Probabilistic output (q05-q95) with CRPS and coverage in CV
+- [ ] Monthly GitHub Actions run that commits dated forecasts, plus `gsl-verify` for a live skill record
+- [ ] Autoresearch loop over the multivariate models (see `autoresearch-memo.md`)
 
 ## Overview
 
@@ -17,7 +49,7 @@ uv sync
 uv run --frozen pytest
 ```
 
-Modelling choices live in `config/config.json` under `forecasting`: `train_start`, `horizon`, `experiment_db`, `output_dir`, and the CV cutoff policy. CLI flags override config; anything not passed falls back to config.
+Modelling choices live in `config/config.json` under `forecasting`: `train_start`, `horizon` (24 months), `experiment_db`, `output_dir`, and the CV cutoff policy. CLI flags override config; anything not passed falls back to config.
 
 ## CLI Commands
 
@@ -36,15 +68,15 @@ The current calendar month is excluded from `monthly_elevation` so a partial mon
 Fits the production subset of models (see `src/forecasting/registry.py`) on history from `train_start` and writes forward predictions to the `forecasts` table, tagged with `run_id`, `experiment_id`, and `data_max` so every prediction is traceable to a run and a data vintage.
 
 ```bash
-uv run gsl-forecast [--horizon 12] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db]
+uv run gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db]
 ```
 
 ### Walk-forward cross-validation
 
-Uses every month-end cutoff in the last `history_years` (about 170) by default, fits every registered model at each cutoff, evaluates at h=1..12, and logs per-horizon MAE, RMSE, and MAE relative to `naive_last` to the experiment tracker. Per-cutoff results are saved as parquet under `outputs/` so errors can be sliced by season of cutoff.
+Uses every month-end cutoff in the last `history_years` (about 170) by default, fits every registered model at each cutoff, evaluates at h=1..24, and logs per-horizon MAE, RMSE, and MAE relative to `naive_last` to the experiment tracker. Per-cutoff results are saved as parquet under `outputs/` so errors can be sliced by season of cutoff.
 
 ```bash
-uv run gsl-cv [--n-cutoffs 20] [--horizon 12] [--history-years 15] [--train-start 1960-01-01] [--output-dir outputs] [--no-plots]
+uv run gsl-cv [--n-cutoffs 20] [--horizon 24] [--history-years 15] [--train-start 1960-01-01] [--output-dir outputs] [--no-plots]
 ```
 
 Pass `--n-cutoffs N` for a seeded random sample instead of all cutoffs.
@@ -58,6 +90,8 @@ uv run gsl-plot [--history-years 10] [--output outputs/gsl_forecast.png]
 ```
 
 ## Current results
+
+These results predate the move to a 24-month horizon and will be refreshed on the next CV run.
 
 Walk-forward CV, 169 month-end cutoffs (September 2011 to August 2025), 12-month horizon, training from 1960, data through August 2026. MAE in feet; ratio is MAE divided by `naive_last` MAE at the same horizon.
 

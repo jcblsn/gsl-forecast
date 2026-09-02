@@ -15,7 +15,7 @@
   },
   "forecasting": {
     "train_start": "1960-01-01",
-    "horizon": 12,
+    "horizon": 24,
     "experiment_db": "forecast_experiments.db",
     "output_dir": "./outputs",
     "cv": {
