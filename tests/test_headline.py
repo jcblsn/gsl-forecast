@@ -92,7 +92,7 @@ def test_compare_joins_on_issue_and_year():
     nrcs = pd.DataFrame(
         {"issue_date": ["2025-04-01"], "implied_peak_ft": [4194.0], "actual_peak_ft": [4193.6]}
     )
-    out = compare(headline, nrcs)
+    out = compare(headline, nrcs, model="m")
     assert out.loc[0, "our_model"] == "m"
     assert out.loc[0, "nrcs_error"] == pytest.approx(0.4)
     assert out.loc[0, "nrcs_error_vs_monthly"] == pytest.approx(0.5)

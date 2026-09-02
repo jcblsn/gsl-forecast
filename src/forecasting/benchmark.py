@@ -10,6 +10,7 @@ from src.config import load_config
 from src.forecasting.headline import ISSUE_LABELS
 
 BENCHMARK_CSV = os.path.join("data", "benchmarks", "nrcs_outlooks.csv")
+MODEL = "ets_damped_s12"
 
 
 def latest_headline_parquet(output_dir: str) -> str:
@@ -19,8 +20,11 @@ def latest_headline_parquet(output_dir: str) -> str:
     return paths[-1]
 
 
-def compare(headline: pd.DataFrame, nrcs: pd.DataFrame) -> pd.DataFrame:
-    """Per issue date: NRCS implied peak and error, our best model's peak and error.
+def compare(headline: pd.DataFrame, nrcs: pd.DataFrame, model: str = MODEL) -> pd.DataFrame:
+    """Per issue date: NRCS implied peak and error, and one named model's peak and error.
+
+    The model is fixed in advance rather than chosen per row so the comparison is not a
+    best-of-thirteen selection made after seeing the answer.
 
     NRCS actuals are daily-reading peaks; ours are the peak of the monthly mean. Both errors
     are reported against their own definition, and the NRCS implied peak is also scored
@@ -30,7 +34,7 @@ def compare(headline: pd.DataFrame, nrcs: pd.DataFrame) -> pd.DataFrame:
     nrcs["issue_date"] = pd.to_datetime(nrcs["issue_date"])
     nrcs["issue"] = nrcs["issue_date"].dt.month.map(ISSUE_LABELS)
     nrcs["water_year"] = nrcs["issue_date"].dt.year
-    peaks = headline[headline["target"] == "peak"]
+    peaks = headline[(headline["target"] == "peak") & (headline["model"] == model)]
     rows = []
     for _, r in nrcs.iterrows():
         ours = peaks[(peaks["issue"] == r["issue"]) & (peaks["water_year"] == r["water_year"])]
@@ -45,7 +49,7 @@ def compare(headline: pd.DataFrame, nrcs: pd.DataFrame) -> pd.DataFrame:
             ),
         }
         if not ours.empty:
-            best = ours.sort_values("abs_error").iloc[0]
+            best = ours.iloc[0]
             row.update(
                 {
                     "our_model": best["model"],
@@ -67,6 +71,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Compare CV spring-peak errors with NRCS")
     parser.add_argument("--headline", help="headline_*.parquet from gsl-cv (default: latest)")
     parser.add_argument("--benchmark", default=BENCHMARK_CSV)
+    parser.add_argument("--model", default=MODEL)
     parser.add_argument("--config")
     args = parser.parse_args()
     output_dir = load_config(args.config)["forecasting"]["output_dir"]
@@ -74,7 +79,7 @@ def main() -> None:
     headline = pd.read_parquet(path)
     nrcs = pd.read_csv(args.benchmark)
     print(f"Headline scores: {path}")
-    print(compare(headline, nrcs).to_string(index=False))
+    print(compare(headline, nrcs, args.model).to_string(index=False))
     print("\nNRCS actuals are daily peaks; our actuals are peaks of the monthly mean.")
 
 
