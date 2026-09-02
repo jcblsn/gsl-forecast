@@ -1,14 +1,8 @@
 {
   "sources": {
-    "usgs_water_surface_elevation_continuous": {
-      "url": "https://waterservices.usgs.gov/nwis/iv/?sites={site}&agencyCd=USGS&parameterCd=62614&format=rdb&startDT={start}&endDT={end}",
-      "site_id": "10010100",
-      "parameter_code": "62614"
-    },
-    "usgs_water_surface_elevation_daily": {
-      "url": "https://waterservices.usgs.gov/nwis/dv?format=json&siteStatus=all&site={site}&agencyCd=USGS&statCd=00003&parameterCd=62614&startDT={start}&endDT={end}",
-      "site_id": "10010000"
-    }
+    "south_arm_site": "10010000",
+    "south_arm_start": "1847-10-18",
+    "elevation_parameter": "62614"
   },
   "database": {
     "path": "./data/gsl.db"
@@ -38,12 +32,19 @@
       "start": "1978-10-01"
     },
     "usgs_discharge": {
-      "sites": {
+      "inflow": {
         "bear": "10126000",
         "weber": "10141000",
         "jordan": "10170490"
       },
+      "exchange": {
+        "breach": "10010020"
+      },
       "start": "1900-01-01"
+    },
+    "north_arm": {
+      "site": "10010100",
+      "start": "1960-01-01"
     }
   }
 }

@@ -1,39 +1,31 @@
-"""Covariates for the lake forecast: SNOTEL snowpack and USGS tributary discharge.
+"""Covariates for the lake forecast: SNOTEL snowpack, USGS tributary discharge, the
+causeway breach flow and the north-arm elevation.
 
 SNOTEL sites are discovered from the NRCS AWDB station list by hydrologic unit and labelled
-by basin (Bear, Weber, Provo-Jordan). Discharge comes from the three gauges the Strike Team
-uses for lake inflow. Everything lands in DuckDB next to the elevation tables and is rolled
-up to a `monthly_covariates` table aligned with `monthly_elevation`.
+by basin (Bear, Weber, Provo-Jordan). Inflow comes from the three gauges the Strike Team
+uses. Everything lands in DuckDB next to the elevation tables and is rolled up to a
+`monthly_covariates` table aligned with `monthly_elevation`.
 """
 
 import logging
-import time
-from datetime import datetime, timedelta
+from datetime import date, timedelta
 
 import duckdb
 import pandas as pd
-import requests
+
+from src.pipeline.usgs import (
+    REFETCH_DAYS,
+    fetch_usgs_daily,
+    get_with_retry,
+    ingest_elevation,
+    upsert,
+)
 
 AWDB = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1"
-USGS_DV = (
-    "https://waterservices.usgs.gov/nwis/dv?format=json&siteStatus=all&site={site}"
-    "&agencyCd=USGS&statCd=00003&parameterCd={param}&startDT={start}&endDT={end}"
-)
+DISCHARGE_PARAMETER = "00060"
+ELEVATION_PARAMETER = "62614"
+NORTH_ARM_TABLE = "usgs_north_arm_elevation_daily"
 SNOTEL_ELEMENTS = ("WTEQ", "PREC")
-
-
-def get_with_retry(url: str, params: dict | None = None, timeout: int = 300, tries: int = 4):
-    """USGS and AWDB both return transient 5xx; back off and retry before giving up."""
-    for attempt in range(tries):
-        resp = requests.get(url, params=params, timeout=timeout)
-        if resp.status_code < 500:
-            resp.raise_for_status()
-            return resp
-        wait = 10 * 2**attempt
-        logging.warning(f"{resp.status_code} from {url[:80]}; retrying in {wait}s")
-        time.sleep(wait)
-    resp.raise_for_status()
-    return resp
 
 
 def basin_for_huc(huc: str, basins: dict[str, str]) -> str | None:
@@ -92,15 +84,6 @@ def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]
     return [(t, d, vals["WTEQ"], vals["PREC"]) for (t, d), vals in rows.items()]
 
 
-def upsert(conn: duckdb.DuckDBPyConnection, table: str, frame: pd.DataFrame) -> None:
-    """Bulk INSERT OR REPLACE from a DataFrame; executemany is far too slow for daily data."""
-    if frame.empty:
-        return
-    conn.register("_upsert", frame)
-    conn.execute(f"INSERT OR REPLACE INTO {table} SELECT * FROM _upsert")
-    conn.unregister("_upsert")
-
-
 def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS snotel_sites (
@@ -122,7 +105,7 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
     )
     logging.info(f"{len(sites)} SNOTEL sites in the GSL basins")
 
-    end = datetime.now().strftime("%Y-%m-%d")
+    end = str(date.today())
     triplets = [s["station_triplet"] for s in sites]
     total = 0
     for i, triplet in enumerate(triplets, start=1):
@@ -139,40 +122,21 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
     logging.info(f"Upserted {total} SNOTEL daily rows")
 
 
-def fetch_usgs_daily(url: str) -> list[tuple[str, float, str]]:
-    resp = get_with_retry(url, timeout=300)
-    series = resp.json().get("value", {}).get("timeSeries", [])
-    if not series:
-        return []
-    rows = []
-    for entry in series[0]["values"][0]["value"]:
-        d = entry.get("dateTime", "").split("T")[0]
-        try:
-            value = float(entry.get("value", ""))
-        except ValueError:
-            continue
-        if value <= -999998:
-            continue
-        q = entry.get("qualifiers", [""])
-        rows.append((d, value, q[0] if isinstance(q, list) else str(q)))
-    return rows
-
-
 def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
+    """Daily mean discharge for the inflow gauges and the causeway breach, one table."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS usgs_discharge_daily (
             site_id VARCHAR, d DATE, discharge_cfs FLOAT, qualifiers VARCHAR,
             PRIMARY KEY (site_id, d)
         )
     """)
-    end = datetime.now().strftime("%Y-%m-%d")
-    for river, site in cfg["sites"].items():
+    end = str(date.today())
+    for river, site in {**cfg["inflow"], **cfg.get("exchange", {})}.items():
         max_d = conn.execute(
             "SELECT MAX(d) FROM usgs_discharge_daily WHERE site_id = ?", [site]
         ).fetchone()[0]
-        start = cfg["start"] if max_d is None else str(max_d)
-        url = USGS_DV.format(site=site, param="00060", start=start, end=end)
-        rows = fetch_usgs_daily(url)
+        start = cfg["start"] if max_d is None else str(max_d - timedelta(days=REFETCH_DAYS))
+        rows = fetch_usgs_daily(site, DISCHARGE_PARAMETER, start, end)
         frame = pd.DataFrame(rows, columns=["d", "discharge_cfs", "qualifiers"])
         frame.insert(0, "site_id", site)
         frame["d"] = pd.to_datetime(frame["d"]).dt.date
@@ -180,13 +144,22 @@ def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         logging.info(f"{river} ({site}): upserted {len(rows)} discharge rows from {start}")
 
 
-def transform_covariates(conn: duckdb.DuckDBPyConnection, sites: dict[str, str]) -> None:
-    """Monthly, complete months only: month-end basin SWE and precipitation, inflow in kaf."""
+def transform_covariates(conn: duckdb.DuckDBPyConnection, discharge: dict) -> None:
+    """Monthly, complete months only: month-end basin SWE and precipitation, inflow and
+    breach flow in kaf, north-arm mean elevation and the south-minus-north head."""
+    inflow = discharge["inflow"]
+    exchange = discharge.get("exchange", {})
     flow_cols = ",\n".join(
-        f"MAX(CASE WHEN site_id = '{site}' THEN kaf END) AS inflow_kaf_{river}"
-        for river, site in sites.items()
+        [
+            f"MAX(CASE WHEN site_id = '{site}' THEN kaf END) AS inflow_kaf_{river}"
+            for river, site in inflow.items()
+        ]
+        + [
+            f"MAX(CASE WHEN site_id = '{site}' THEN kaf END) AS {name}_kaf"
+            for name, site in exchange.items()
+        ]
     )
-    total = " + ".join(f"inflow_kaf_{river}" for river in sites)
+    total = " + ".join(f"inflow_kaf_{river}" for river in inflow)
     conn.execute(f"""
         CREATE OR REPLACE TABLE monthly_covariates AS
         WITH eom AS (
@@ -226,11 +199,19 @@ def transform_covariates(conn: duckdb.DuckDBPyConnection, sites: dict[str, str])
             SELECT month,
                    {flow_cols}
             FROM flow WHERE n_days >= 25 GROUP BY month
+        ),
+        north AS (
+            SELECT DATE_TRUNC('month', d) AS month, AVG(elevation) AS north_arm_ft
+            FROM {NORTH_ARM_TABLE} GROUP BY month
         )
-        SELECT COALESCE(s.month, f.month) AS month, s.* EXCLUDE (month), f.* EXCLUDE (month),
-               {total} AS inflow_kaf_total
-        FROM swe_wide s FULL OUTER JOIN flow_wide f USING (month)
-        WHERE COALESCE(s.month, f.month) < DATE_TRUNC('month', CURRENT_DATE)
+        SELECT month, s.* EXCLUDE (month), f.* EXCLUDE (month),
+               {total} AS inflow_kaf_total,
+               n.north_arm_ft, e.avg_elevation - n.north_arm_ft AS head_diff_ft
+        FROM swe_wide s
+        FULL OUTER JOIN flow_wide f USING (month)
+        FULL OUTER JOIN north n USING (month)
+        LEFT JOIN monthly_elevation e USING (month)
+        WHERE month < DATE_TRUNC('month', CURRENT_DATE)
         ORDER BY month
     """)
 
@@ -239,6 +220,8 @@ def run_covariates(conn: duckdb.DuckDBPyConnection, config: dict) -> None:
     cov = config["covariates"]
     ingest_snotel(conn, cov["snotel"])
     ingest_usgs_discharge(conn, cov["usgs_discharge"])
-    transform_covariates(conn, cov["usgs_discharge"]["sites"])
+    north = cov["north_arm"]
+    ingest_elevation(conn, NORTH_ARM_TABLE, north["site"], ELEVATION_PARAMETER, north["start"])
+    transform_covariates(conn, cov["usgs_discharge"])
     n = conn.execute("SELECT COUNT(*) FROM monthly_covariates").fetchone()[0]
     logging.info(f"monthly_covariates has {n} rows")
