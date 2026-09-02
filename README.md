@@ -27,12 +27,14 @@ The benchmark to beat in season is the NRCS outlook; out of season the benchmark
 
 - [x] Univariate baselines with walk-forward CV and experiment tracking
 - [x] Survey of operational and gray-literature forecasts
-- [ ] Score the headline scalars (spring peak, water-year-end low) by issue month and place them next to the NRCS record in `data/benchmarks/`
-- [ ] Ingest covariates: SNOTEL basin snow water equivalent and precipitation, USGS inflow gauges (Bear 10127110, Weber 10141000, Jordan 10170490), issued NRCS/CBRFC inflow forecasts
-- [ ] Multivariate models: SWE regression (the NRCS method), ETS with regressors, monthly water balance with quantile paths
-- [ ] Probabilistic output (q05-q95) with CRPS and coverage in CV
-- [ ] Monthly GitHub Actions run that commits dated forecasts, plus `gsl-verify` for a live skill record
-- [ ] Autoresearch loop over the multivariate models (see `autoresearch-memo.md`)
+- [x] Score the headline scalars (spring peak, water-year-end low) by issue month and place them next to the NRCS record in `data/benchmarks/`
+- [x] Ingest covariates: SNOTEL basin snow water equivalent and precipitation, USGS inflow gauges (Bear 10126000, Weber 10141000, Jordan 10170490), issued NRCS/CBRFC inflow forecasts
+- [x] Multivariate models: SWE regression (the NRCS method) and a reduced-form inflow-chain water balance
+- [x] Probabilistic output (q05-q95) from walk-forward errors, scored with CRPS and 90% coverage in CV
+- [x] Monthly GitHub Actions run that commits dated forecasts to `forecasts/`, plus `gsl-verify` for a live skill record
+- [x] Autoresearch program for the multivariate models (`program.md`); loop not yet run
+- [ ] Bathymetry (USGS elevation-area-volume table) in the water balance
+- [ ] Percent-of-median snowpack features and issued inflow forecasts as covariates
 
 ## Overview
 
@@ -55,10 +57,10 @@ Modelling choices live in `config/config.json` under `forecasting`: `train_start
 
 ### Run the ELT pipeline
 
-Fetches USGS data (continuous 15-min + daily) and populates the local DuckDB. Incremental — checks the max date in the DB and only fetches new records.
+Fetches USGS elevation data (continuous 15-min + daily), then the covariates (SNOTEL daily SWE and precipitation for every site in the Bear, Weber and Provo-Jordan hydrologic units; USGS daily discharge for the three inflow gauges), and populates the local DuckDB. Incremental — checks the max date per table (per station for SNOTEL) and only fetches new records. The first run pulls about 50 years of daily data and takes a few minutes.
 
 ```bash
-uv run gsl-pipeline
+uv run gsl-pipeline [--skip-covariates]
 ```
 
 The current calendar month is excluded from `monthly_elevation` so a partial month is never treated as a full-month average.
@@ -68,8 +70,10 @@ The current calendar month is excluded from `monthly_elevation` so a partial mon
 Fits the production subset of models (see `src/forecasting/registry.py`) on history from `train_start` and writes forward predictions to the `forecasts` table, tagged with `run_id`, `experiment_id`, and `data_max` so every prediction is traceable to a run and a data vintage.
 
 ```bash
-uv run gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db]
+uv run gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09.csv --intervals outputs/cv_results_<stamp>.parquet]
 ```
+
+`--export` writes a dated forecast file (issue month, target month, lead, model, point forecast, and q05-q95 when `--intervals` names a CV results file to take empirical error quantiles from). The monthly GitHub Actions workflow (`.github/workflows/forecast.yml`) runs pipeline, CV, forecast and verification and commits the file under `forecasts/`.
 
 ### Walk-forward cross-validation
 
@@ -79,7 +83,25 @@ Uses every month-end cutoff in the last `history_years` (about 170) by default, 
 uv run gsl-cv [--n-cutoffs 20] [--horizon 24] [--history-years 15] [--train-start 1960-01-01] [--output-dir outputs] [--no-plots]
 ```
 
-Pass `--n-cutoffs N` for a seeded random sample instead of all cutoffs.
+Pass `--n-cutoffs N` for a seeded random sample instead of all cutoffs, and `--models a,b` to evaluate a subset (the `naive_last` baseline is always included).
+
+Besides per-horizon MAE, CV logs the two headline scalars by issue date (`peak_mae_jan` … `peak_mae_may`, `wyend_mae_jan` … `wyend_mae_may`: the spring peak and September level as forecast from data ending the previous month) and probabilistic scores (`crps_h1` … and `cov90_h1` …) from leave-one-year-out empirical intervals. A `headline_<stamp>.parquet` sits next to the per-cutoff parquet.
+
+### Benchmark against NRCS
+
+```bash
+uv run gsl-benchmark [--headline outputs/headline_<stamp>.parquet] [--model ets_damped_s12]
+```
+
+Prints the NRCS outlook record from `data/benchmarks/nrcs_outlooks.csv` (issue date, implied peak, actual peak) next to one fixed model's spring-peak forecast from the same issue date. NRCS actuals are daily peaks; ours are peaks of the monthly mean, so the last column rescores NRCS against the monthly-mean actual.
+
+### Verify issued forecasts
+
+```bash
+uv run gsl-verify [--forecast-dir forecasts]
+```
+
+Joins every dated forecast in `forecasts/` to the observed monthly means and writes MAE, bias and 90% coverage by model and lead to `forecasts/verification.csv`. This is the live skill record.
 
 ### Plot forecasts
 
@@ -151,6 +173,8 @@ CV runs log `mae_h1`…`mae_h12`, `rmse_h1`…`rmse_h12`, and `mae_ratio_h1`…`
 | `ets_add_noseas` | Holt linear trend, no seasonal component |
 | `ets_damped_noseas` | Holt damped trend, no seasonal component |
 | `theta` | Theta method: SES plus half the linear trend slope |
+| `swe_regression` | For the cutoff's calendar month and each lead, regresses the change in elevation on current level, basin month-end SWE and water-year precipitation across past years (the NRCS outlook generalised to every month and lead) |
+| `inflow_chain` | Snowpack predicts each future month's tributary inflow; a fitted monthly bucket step (change as a function of that month's inflow and the starting level) rolls the elevation forward |
 
 All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(df)`, `predict(h)`, and `get_metrics()`. The single list of models is `all_forecasters()` in `src/forecasting/registry.py`; `production_forecasters()` is the subset written by `gsl-forecast`.
 
@@ -160,6 +184,7 @@ All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(
 src/
   pipeline/
     elt.py              # Extract (USGS HTTP), load (DuckDB), transform (monthly agg)
+    covariates.py       # SNOTEL and discharge ingestion, monthly_covariates
   forecasting/
     base.py             # Forecaster ABC
     registry.py         # The one list of models (all / production subset)
@@ -168,6 +193,15 @@ src/
     plots.py            # CV plots
     plot_forecasts.py   # Plotnine visualization of actuals + forecasts
     view_results.py     # Print experiment metrics via experiment tracker
+    data.py             # monthly_elevation joined to monthly_covariates
+    headline.py         # Spring-peak and water-year-end scoring by issue month
+    quantiles.py        # Empirical intervals, pinball/CRPS, coverage
+    benchmark.py        # gsl-benchmark: our peaks next to the NRCS record
+    verify.py           # gsl-verify: score dated forecasts in forecasts/
+    multivariate/
+      regression.py     # Ridge helper and column checks
+      swe_regression.py
+      inflow_chain.py
     univariate/
       naive.py
       moving_average.py
@@ -181,6 +215,11 @@ tests/
   test_forecasting.py   # Forecaster correctness tests
   test_cross_validate.py
   test_end_to_end.py    # CV and forecast runs against a temp DB; CLI --help checks
+data/
+  benchmarks/nrcs_outlooks.csv          # Published NRCS outlooks vs actual peaks, 2024-2026
+  external/nrcs_gsl_inflow_forecasts.csv # Issued GSL inflow exceedance forecasts
+forecasts/              # Dated forecast CSVs committed by the monthly workflow
+program.md              # Autoresearch strategy for the multivariate models
 outputs/                # gitignored: CV parquet and PNGs
 ```
 
@@ -194,6 +233,12 @@ Two USGS sources are fetched and stored in DuckDB (`./data/gsl.db`):
 | `usgs_water_surface_elevation_daily` | Site 10010000 | Daily (1847–present) |
 | `monthly_elevation` | Derived | Monthly avg/min/max/count, complete months only |
 | `forecasts` | Model output | Monthly predictions with run_id, experiment_id, data_max |
+| `snotel_sites` | NRCS AWDB | Active SNOTEL sites in HUC 1601 (Bear), 160201 (Weber), 160202 (Provo-Jordan) |
+| `snotel_daily` | NRCS AWDB | Daily SWE and water-year precipitation per site, 1978-present |
+| `usgs_discharge_daily` | Sites 10126000, 10141000, 10170490 | Daily mean discharge, cfs |
+| `monthly_covariates` | Derived | Month-end basin-mean SWE and precipitation (per basin and pooled), site count, monthly inflow in kaf per river and total |
+
+Basin SWE is a plain mean over the sites reporting at month end, so it drifts as the site roster grows; a percent-of-median version is on the roadmap.
 
 Before 1960 the daily table holds about one reading per month, and before 1980 about two, so `monthly_elevation` rows from that era are single readings rather than averages. That is the main reason training from 1960 onward beats the full 1847-present series, and why `train_start` is a config setting rather than a flag to remember.
 
