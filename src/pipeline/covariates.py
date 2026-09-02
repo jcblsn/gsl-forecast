@@ -158,9 +158,14 @@ def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         logging.info(f"{river} ({site}): upserted {len(rows)} discharge rows from {start}")
 
 
-def transform_covariates(conn: duckdb.DuckDBPyConnection) -> None:
+def transform_covariates(conn: duckdb.DuckDBPyConnection, sites: dict[str, str]) -> None:
     """Monthly, complete months only: month-end basin SWE and precipitation, inflow in kaf."""
-    conn.execute("""
+    flow_cols = ",\n".join(
+        f"MAX(CASE WHEN site_id = '{site}' THEN kaf END) AS inflow_kaf_{river}"
+        for river, site in sites.items()
+    )
+    total = " + ".join(f"inflow_kaf_{river}" for river in sites)
+    conn.execute(f"""
         CREATE OR REPLACE TABLE monthly_covariates AS
         WITH eom AS (
             SELECT s.basin, d.station_triplet, DATE_TRUNC('month', d.d) AS month,
@@ -197,13 +202,11 @@ def transform_covariates(conn: duckdb.DuckDBPyConnection) -> None:
         ),
         flow_wide AS (
             SELECT month,
-                   MAX(CASE WHEN site_id = '10127110' THEN kaf END) AS inflow_kaf_bear,
-                   MAX(CASE WHEN site_id = '10141000' THEN kaf END) AS inflow_kaf_weber,
-                   MAX(CASE WHEN site_id = '10170490' THEN kaf END) AS inflow_kaf_jordan
+                   {flow_cols}
             FROM flow WHERE n_days >= 25 GROUP BY month
         )
         SELECT COALESCE(s.month, f.month) AS month, s.* EXCLUDE (month), f.* EXCLUDE (month),
-               inflow_kaf_bear + inflow_kaf_weber + inflow_kaf_jordan AS inflow_kaf_total
+               {total} AS inflow_kaf_total
         FROM swe_wide s FULL OUTER JOIN flow_wide f USING (month)
         WHERE COALESCE(s.month, f.month) < DATE_TRUNC('month', CURRENT_DATE)
         ORDER BY month
@@ -214,6 +217,6 @@ def run_covariates(conn: duckdb.DuckDBPyConnection, config: dict) -> None:
     cov = config["covariates"]
     ingest_snotel(conn, cov["snotel"])
     ingest_usgs_discharge(conn, cov["usgs_discharge"])
-    transform_covariates(conn)
+    transform_covariates(conn, cov["usgs_discharge"]["sites"])
     n = conn.execute("SELECT COUNT(*) FROM monthly_covariates").fetchone()[0]
     logging.info(f"monthly_covariates has {n} rows")

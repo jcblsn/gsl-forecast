@@ -39,7 +39,7 @@
     },
     "usgs_discharge": {
       "sites": {
-        "bear": "10127110",
+        "bear": "10126000",
         "weber": "10141000",
         "jordan": "10170490"
       },

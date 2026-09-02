@@ -9,7 +9,7 @@ CFG = {
         "basins": {"1601": "bear", "160201": "weber", "160202": "provo_jordan"},
         "start": "2020-01-01",
     },
-    "usgs_discharge": {"sites": {"bear": "10127110"}, "start": "2020-01-01"},
+    "usgs_discharge": {"sites": {"bear": "10126000"}, "start": "2020-01-01"},
 }
 
 

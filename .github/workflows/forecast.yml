@@ -1,0 +1,32 @@
+name: monthly-forecast
+
+on:
+  schedule:
+    - cron: "0 14 2 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run --frozen gsl-pipeline
+      - run: uv run --frozen gsl-cv --no-plots
+      - name: Forecast and verify
+        run: |
+          stamp=$(date -u +%Y-%m)
+          cv=$(ls -t outputs/cv_results_*.parquet | head -1)
+          uv run --frozen gsl-forecast --export forecasts/$stamp.csv --intervals "$cv"
+          uv run --frozen gsl-verify
+      - name: Commit dated forecast
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add forecasts
+          git diff --cached --quiet || git commit -m "Forecast issued $(date -u +%Y-%m-%d)"
+          git push

@@ -26,6 +26,7 @@ gsl-plot = "src.forecasting.plot_forecasts:main"
 gsl-cv = "src.forecasting.cross_validate:main"
 gsl-results = "src.forecasting.view_results:main"
 gsl-benchmark = "src.forecasting.benchmark:main"
+gsl-verify = "src.forecasting.verify:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

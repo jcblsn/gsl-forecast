@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 
 import duckdb
 import pandas as pd
@@ -8,6 +9,7 @@ from experiment_tracker import ExperimentTracker
 from src.config import load_config
 from src.forecasting.base import Forecaster
 from src.forecasting.data import load_monthly_data
+from src.forecasting.quantiles import apply_intervals, error_quantiles
 from src.forecasting.registry import production_forecasters
 
 
@@ -130,19 +132,48 @@ def run_forecasts(
     return combined
 
 
+def export_forecasts(
+    predictions: pd.DataFrame, path: str, cv_parquet: str | None = None
+) -> pd.DataFrame:
+    """Write one dated forecast file: issue month, target month, lead, model, point, intervals."""
+    out = predictions.rename(columns={"model_name": "model"})[["month", "model", "pred"]].copy()
+    out["month"] = pd.to_datetime(out["month"])
+    origin = out["month"].min() - pd.DateOffset(months=1)
+    out["issue"] = origin + pd.DateOffset(months=1)
+    out["h"] = (out["month"].dt.year - origin.year) * 12 + out["month"].dt.month - origin.month
+    if cv_parquet:
+        eq = error_quantiles(pd.read_parquet(cv_parquet))
+        out = pd.concat(
+            [apply_intervals(g, eq, m) for m, g in out.groupby("model")], ignore_index=True
+        )
+    out = out.sort_values(["model", "h"]).reset_index(drop=True)
+    out["issue"] = out["issue"].dt.date
+    out["month"] = out["month"].dt.date
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    out.to_csv(path, index=False, float_format="%.3f")
+    logging.info(f"Exported {len(out)} rows to {path}")
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run GSL water level forecasts")
     parser.add_argument("--config", help="Path to config file")
     parser.add_argument("--horizon", type=int, help="Forecast horizon in months")
     parser.add_argument("--experiment-db", help="Path to experiment database")
     parser.add_argument("--train-start", help="Earliest training date, e.g. 1960-01-01")
+    parser.add_argument(
+        "--export", help="CSV path for the dated forecast, e.g. forecasts/2026-09.csv"
+    )
+    parser.add_argument("--intervals", help="cv_results parquet used for empirical intervals")
     args = parser.parse_args()
-    run_forecasts(
+    preds = run_forecasts(
         config_path=args.config,
         horizon=args.horizon,
         experiment_db=args.experiment_db,
         train_start=args.train_start,
     )
+    if args.export and not preds.empty:
+        export_forecasts(preds, args.export, args.intervals)
 
 
 if __name__ == "__main__":
