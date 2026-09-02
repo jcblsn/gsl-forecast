@@ -17,6 +17,8 @@ class FakeResponse:
     def __init__(self, payload):
         self.payload = payload
 
+    status_code = 200
+
     def raise_for_status(self):
         pass
 

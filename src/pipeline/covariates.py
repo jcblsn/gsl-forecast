@@ -7,6 +7,7 @@ up to a `monthly_covariates` table aligned with `monthly_elevation`.
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 
 import duckdb
@@ -21,6 +22,20 @@ USGS_DV = (
 SNOTEL_ELEMENTS = ("WTEQ", "PREC")
 
 
+def get_with_retry(url: str, params: dict | None = None, timeout: int = 300, tries: int = 4):
+    """USGS and AWDB both return transient 5xx; back off and retry before giving up."""
+    for attempt in range(tries):
+        resp = requests.get(url, params=params, timeout=timeout)
+        if resp.status_code < 500:
+            resp.raise_for_status()
+            return resp
+        wait = 10 * 2**attempt
+        logging.warning(f"{resp.status_code} from {url[:80]}; retrying in {wait}s")
+        time.sleep(wait)
+    resp.raise_for_status()
+    return resp
+
+
 def basin_for_huc(huc: str, basins: dict[str, str]) -> str | None:
     for prefix, basin in basins.items():
         if huc.startswith(prefix):
@@ -31,12 +46,11 @@ def basin_for_huc(huc: str, basins: dict[str, str]) -> str | None:
 def fetch_snotel_sites(states: list[str], basins: dict[str, str]) -> list[dict]:
     sites = []
     for state in states:
-        resp = requests.get(
+        resp = get_with_retry(
             f"{AWDB}/stations",
             params={"stationTriplets": f"*:{state}:SNTL", "activeOnly": "true"},
             timeout=120,
         )
-        resp.raise_for_status()
         for s in resp.json():
             basin = basin_for_huc(str(s.get("huc", "")), basins)
             if basin:
@@ -56,7 +70,7 @@ def fetch_snotel_sites(states: list[str], basins: dict[str, str]) -> list[dict]:
 
 
 def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]:
-    resp = requests.get(
+    resp = get_with_retry(
         f"{AWDB}/data",
         params={
             "stationTriplets": ",".join(triplets),
@@ -67,7 +81,6 @@ def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]
         },
         timeout=300,
     )
-    resp.raise_for_status()
     rows: dict[tuple[str, str], dict[str, float | None]] = {}
     for station in resp.json():
         triplet = station["stationTriplet"]
@@ -127,8 +140,7 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
 
 
 def fetch_usgs_daily(url: str) -> list[tuple[str, float, str]]:
-    resp = requests.get(url, timeout=300)
-    resp.raise_for_status()
+    resp = get_with_retry(url, timeout=300)
     series = resp.json().get("value", {}).get("timeSeries", [])
     if not series:
         return []
