@@ -240,6 +240,24 @@ class TestRunPipeline:
             run_pipeline(config_path)
 
 
+class TestTransformExcludesCurrentMonth:
+    def test_partial_current_month_is_dropped(self, conn):
+        conn.execute(
+            "CREATE TABLE usgs_water_surface_elevation_daily "
+            "(d DATE, elevation FLOAT, qualifiers VARCHAR)"
+        )
+        conn.execute(
+            "INSERT INTO usgs_water_surface_elevation_daily VALUES ('2022-01-01', 4195.0, 'A')"
+        )
+        conn.execute(
+            "INSERT INTO usgs_water_surface_elevation_daily "
+            "VALUES (DATE_TRUNC('month', CURRENT_DATE), 4190.0, 'P')"
+        )
+        transform(conn)
+        months = [r[0] for r in conn.execute("SELECT month FROM monthly_elevation").fetchall()]
+        assert len(months) == 1 and str(months[0]).startswith("2022-01")
+
+
 class TestRdbValueColumns:
     def test_selects_by_parameter_code(self):
         from src.pipeline.elt import rdb_value_columns

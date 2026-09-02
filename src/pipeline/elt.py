@@ -141,6 +141,7 @@ def transform(conn: duckdb.DuckDBPyConnection) -> None:
             MAX(elevation) AS max_elevation,
             COUNT(*) AS observation_count
         FROM usgs_water_surface_elevation_daily
+        WHERE d < DATE_TRUNC('month', CURRENT_DATE)
         GROUP BY month
         ORDER BY month
     """)
