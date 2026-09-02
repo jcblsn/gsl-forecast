@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta
 
 import duckdb
+import pandas as pd
 import requests
 
 AWDB = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1"
@@ -78,6 +79,15 @@ def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]
     return [(t, d, vals["WTEQ"], vals["PREC"]) for (t, d), vals in rows.items()]
 
 
+def upsert(conn: duckdb.DuckDBPyConnection, table: str, frame: pd.DataFrame) -> None:
+    """Bulk INSERT OR REPLACE from a DataFrame; executemany is far too slow for daily data."""
+    if frame.empty:
+        return
+    conn.register("_upsert", frame)
+    conn.execute(f"INSERT OR REPLACE INTO {table} SELECT * FROM _upsert")
+    conn.unregister("_upsert")
+
+
 def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS snotel_sites (
@@ -108,9 +118,9 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         ).fetchone()[0]
         start = cfg["start"] if max_d is None else str(max_d - timedelta(days=7))
         rows = fetch_snotel_daily([triplet], start, end)
-        conn.executemany(
-            "INSERT OR REPLACE INTO snotel_daily VALUES (?, CAST(? AS DATE), ?, ?)", rows
-        )
+        frame = pd.DataFrame(rows, columns=["station_triplet", "d", "wteq_in", "prec_in"])
+        frame["d"] = pd.to_datetime(frame["d"]).dt.date
+        upsert(conn, "snotel_daily", frame)
         total += len(rows)
         logging.info(f"SNOTEL {i}/{len(triplets)} {triplet}: {len(rows)} rows from {start}")
     logging.info(f"Upserted {total} SNOTEL daily rows")
@@ -151,10 +161,10 @@ def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         start = cfg["start"] if max_d is None else str(max_d)
         url = USGS_DV.format(site=site, param="00060", start=start, end=end)
         rows = fetch_usgs_daily(url)
-        conn.executemany(
-            "INSERT OR REPLACE INTO usgs_discharge_daily VALUES (?, CAST(? AS DATE), ?, ?)",
-            [(site, d, v, q) for d, v, q in rows],
-        )
+        frame = pd.DataFrame(rows, columns=["d", "discharge_cfs", "qualifiers"])
+        frame.insert(0, "site_id", site)
+        frame["d"] = pd.to_datetime(frame["d"]).dt.date
+        upsert(conn, "usgs_discharge_daily", frame)
         logging.info(f"{river} ({site}): upserted {len(rows)} discharge rows from {start}")
 
 
