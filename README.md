@@ -210,6 +210,7 @@ CV runs log `mae_h<h>`, `rmse_h<h>`, and `mae_ratio_h<h>` (MAE divided by `naive
 | `theta` | Theta method: SES plus half the linear trend slope |
 | `swe_regression` | For the cutoff's calendar month and each lead, regresses the change in elevation on current level, basin month-end SWE and water-year precipitation across past years (the NRCS outlook generalised to every month and lead) |
 | `inflow_chain` | Snowpack predicts each future month's tributary inflow; a fitted monthly bucket step (change as a function of that month's inflow and the starting level) rolls the elevation forward |
+| `swe_head` | `swe_regression` plus the south-minus-north head difference; the best spring-peak model from January and February issues in CV, worse beyond lead 15 |
 | `inflow_chain_area` | The same with lake area from the USGS hypsometry in place of the level, so the evaporation term scales with area |
 
 All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(df)`, `predict(h)`, and `get_metrics()`. The single list of models is `all_forecasters()` in `src/forecasting/registry.py`; `production_forecasters()` is the subset written by `gsl-forecast`.

@@ -1,0 +1,13 @@
+# One line per experiment: date | model | change | peak_mae_feb | mae_h6 | crps_h6 | wyend_mae_apr | wyend_mae_aug | mae_h20 | keep
+# Harness: gsl-cv defaults (157 cutoffs 2011-08..2024-08, 24-month horizon, train from 1960). Baselines from the same run.
+2026-09-02 | swe_regression | baseline (swe_eom_gsl, prec_wy_eom_gsl) | 0.625 | 0.550 | 0.192 | 0.433 | 0.190 | 1.786 | -
+2026-09-02 | ets_damped_s12 | baseline | 0.869 | 0.824 | 0.256 | 0.936 | 0.297 | 1.742 | -
+2026-09-02 | inflow_chain | baseline | 0.580 | 0.669 | 0.175 | 0.734 | 0.193 | 2.035 | -
+2026-09-02 | inflow_chain_area | lake area instead of level in the bucket step | 0.593 | 0.675 | 0.177 | 0.736 | 0.192 | 2.061 | registered, no gain
+2026-09-02 | swe_pct | percent-of-median SWE and precipitation instead of inches | 0.607 | 0.564 | - | 0.500 | 0.146 | 1.738 | no: peak and h6 slightly worse, better after June
+2026-09-02 | swe_res | + res_kaf_total | 0.685 | 0.641 | - | 0.575 | 0.195 | 2.206 | no: worse everywhere (13 rows per calendar month overfit a third regressor)
+2026-09-02 | swe_pct_res | percent-of-median + res_kaf_total | 0.681 | 0.635 | - | 0.617 | 0.146 | 2.033 | no
+2026-09-02 | swe_res_sms | + res_kaf_total + sms_eom_gsl | 0.625 | 0.624 | - | 0.686 | 0.136 | 1.723 | no for the peak; best Jul/Aug water-year end (0.178/0.136)
+2026-09-02 | swe_head | + head_diff_ft (south minus north arm) | 0.566 | 0.526 | - | 0.529 | 0.193 | 2.108 | keep: peak_mae_feb and mae_h6 both improve; Jan peak 0.694 vs 0.838; worse beyond h15; registered as swe_head
+2026-09-02 | chain_res | stage one + res_kaf_total | 0.726 | 0.829 | - | 0.970 | 0.217 | 2.467 | no
+2026-09-02 | chain_pct_res | stage one percent-of-median + res_kaf_total | 0.722 | 0.838 | - | 1.015 | 0.176 | 2.374 | no

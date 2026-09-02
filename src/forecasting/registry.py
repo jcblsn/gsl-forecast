@@ -27,6 +27,9 @@ def all_forecasters() -> list[Forecaster]:
         HoltWintersForecaster(trend="add", seasonal="add", seasonal_periods=12, damped_trend=True),
         ThetaForecaster(),
         SweRegressionForecaster(),
+        SweRegressionForecaster(
+            features=["swe_eom_gsl", "prec_wy_eom_gsl", "head_diff_ft"], name="swe_head"
+        ),
         InflowChainForecaster(),
         InflowChainForecaster(level_term="area", name="inflow_chain_area"),
     ]
