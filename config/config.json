@@ -43,6 +43,13 @@
       "station": "10010000:UT:USGS",
       "start": "1986-01-01"
     },
+    "climdiv": {
+      "state": "42",
+      "divisions": [
+        "03",
+        "05"
+      ]
+    },
     "usgs_discharge": {
       "inflow": {
         "bear": "10126000",

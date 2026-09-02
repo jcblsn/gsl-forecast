@@ -13,6 +13,7 @@ from datetime import date, timedelta
 import duckdb
 import pandas as pd
 
+from src.pipeline.climate import ingest_climdiv
 from src.pipeline.usgs import (
     REFETCH_DAYS,
     fetch_usgs_daily,
@@ -282,7 +283,8 @@ def transform_covariates(
     not drift the index), and 8-inch soil moisture. Reservoir storage at month end summed
     over the reporting stations per basin (the roster grows with dam construction, so early
     sums are smaller for a physical reason). Inflow and breach flow in kaf, north-arm mean
-    elevation and the south-minus-north head."""
+    elevation, the south-minus-north head, and climate-division mean temperature and
+    precipitation (one month behind at issue time)."""
     inflow = discharge["inflow"]
     exchange = discharge.get("exchange", {})
     flow_cols = ",\n".join(
@@ -363,15 +365,21 @@ def transform_covariates(
         north AS (
             SELECT DATE_TRUNC('month', d) AS month, AVG(elevation) AS north_arm_ft
             FROM {NORTH_ARM_TABLE} GROUP BY month
+        ),
+        climate AS (
+            SELECT month, AVG(tavg_f) AS tavg_f_gsl, AVG(prcp_in) AS prcp_in_gsl
+            FROM climdiv_monthly GROUP BY month
         )
         SELECT month, s.* EXCLUDE (month), f.* EXCLUDE (month),
                {total} AS inflow_kaf_total,
                r.* EXCLUDE (month),
-               n.north_arm_ft, e.avg_elevation - n.north_arm_ft AS head_diff_ft
+               n.north_arm_ft, e.avg_elevation - n.north_arm_ft AS head_diff_ft,
+               c.* EXCLUDE (month)
         FROM snow_wide s
         FULL OUTER JOIN flow_wide f USING (month)
         FULL OUTER JOIN res_wide r USING (month)
         FULL OUTER JOIN north n USING (month)
+        FULL OUTER JOIN climate c USING (month)
         LEFT JOIN monthly_elevation e USING (month)
         WHERE month < DATE_TRUNC('month', CURRENT_DATE)
         ORDER BY month
@@ -383,6 +391,7 @@ def run_covariates(conn: duckdb.DuckDBPyConnection, config: dict) -> None:
     ingest_snotel(conn, cov["snotel"])
     ingest_reservoirs(conn, cov["reservoirs"], cov["snotel"]["basins"])
     ingest_nrcs_forecasts(conn, cov["nrcs_forecasts"])
+    ingest_climdiv(conn, cov["climdiv"])
     ingest_usgs_discharge(conn, cov["usgs_discharge"])
     north = cov["north_arm"]
     ingest_elevation(conn, NORTH_ARM_TABLE, north["site"], ELEVATION_PARAMETER, north["start"])

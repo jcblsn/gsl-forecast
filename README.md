@@ -34,7 +34,7 @@ The benchmark to beat in season is the NRCS outlook; out of season the benchmark
 - [x] Monthly GitHub Actions run that commits dated forecasts to `forecasts/`, plus `gsl-verify` for a live skill record
 - [x] Feature store: percent-of-median snowpack, soil moisture, reservoir storage, north-arm level and breach flow, the issued NRCS inflow forecast (all from live APIs)
 - [x] Autoresearch program for the multivariate models (`docs/program.md`); loop not yet run
-- [ ] Bathymetry (USGS elevation-area-volume table) in the water balance
+- [x] Bathymetry (USGS elevation-area-volume table) as `inflow_chain_area`; climate-division temperature and precipitation ingested
 - [ ] Reservoir storage and percent-of-median snowpack in the production models (via the program loop)
 - [ ] One blended official model for the 24-month product
 
@@ -207,6 +207,7 @@ CV runs log `mae_h<h>`, `rmse_h<h>`, and `mae_ratio_h<h>` (MAE divided by `naive
 | `theta` | Theta method: SES plus half the linear trend slope |
 | `swe_regression` | For the cutoff's calendar month and each lead, regresses the change in elevation on current level, basin month-end SWE and water-year precipitation across past years (the NRCS outlook generalised to every month and lead) |
 | `inflow_chain` | Snowpack predicts each future month's tributary inflow; a fitted monthly bucket step (change as a function of that month's inflow and the starting level) rolls the elevation forward |
+| `inflow_chain_area` | The same with lake area from the USGS hypsometry in place of the level, so the evaporation term scales with area |
 
 All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(df)`, `predict(h)`, and `get_metrics()`. The single list of models is `all_forecasters()` in `src/forecasting/registry.py`; `production_forecasters()` is the subset written by `gsl-forecast`.
 
@@ -218,6 +219,7 @@ src/
     usgs.py             # USGS Water Data API fetcher, retry, upsert
     elt.py              # South-arm elevation into DuckDB, monthly_elevation, transactions
     covariates.py       # SNOTEL, reservoirs, discharge, north arm, NRCS forecasts; monthly_covariates
+    climate.py          # NOAA nClimDiv monthly temperature and precipitation
   forecasting/
     base.py             # Forecaster ABC
     registry.py         # The one list of models (all / production subset)
@@ -230,6 +232,7 @@ src/
     headline.py         # Spring-peak and water-year-end scoring by issue month
     quantiles.py        # Empirical intervals, pinball/CRPS, coverage
     benchmark.py        # gsl-benchmark: refit peaks and inflow next to the NRCS record
+    hypsometry.py       # South-arm area and volume from elevation (USGS 2023 tables)
     verify.py           # gsl-verify: score dated forecasts in forecasts/
     hindcast.py         # gsl-hindcast: chart a past cutoff against observations
     multivariate/
@@ -247,6 +250,7 @@ config/
 tests/                  # One file per module; in-memory DuckDB and fake HTTP responses
 data/
   benchmarks/nrcs_outlooks.csv   # Published NRCS outlooks vs actual peaks, 2024-2026
+  external/gsl_south_arm_hypsometry.csv  # USGS 2023 elevation-area-volume table, 0.1 ft steps
 forecasts/              # Dated forecast CSVs and meta sidecars committed by the monthly workflow
 docs/                   # Surveys, literature review, and the autoresearch program
 outputs/                # gitignored: CV parquet and PNGs
@@ -265,8 +269,9 @@ Everything is stored in DuckDB (`./data/gsl.db`). Every source is a live API, so
 | `reservoir_sites`, `reservoir_monthly` | NRCS AWDB (Bureau of Reclamation stations) | End-of-month storage, kaf, for the 21 reservoirs in the same units (Bear Lake from 1911, Utah Lake from 1932, Jordanelle from 1993) |
 | `usgs_discharge_daily` | USGS 10126000 (Bear), 10141000 (Weber), 10170490 (Jordan plus Surplus Canal), 10010020 (causeway breach) | Daily mean discharge, cfs |
 | `usgs_north_arm_elevation_daily` | USGS 10010100 (Saline) | Daily north-arm elevation, 1966-present |
+| `climdiv_monthly` | NOAA nClimDiv, Utah divisions 03 (North Central) and 05 (Northern Mountains) | Monthly mean temperature and precipitation, 1895-present; a month is released around the 8th of the next month, so the cutoff month is always missing at issue time |
 | `nrcs_inflow_forecasts` | NRCS AWDB forecast point 10010000:UT:USGS | Published Great Salt Lake inflow forecast at 10/30/50/70/90 percent exceedance and the period normal, monthly January-May since 2024 |
-| `monthly_covariates` | Derived | One row per complete month: `swe_eom_*`, `prec_wy_eom_*`, `swe_pct_median_*`, `prec_pct_median_*`, `sms_eom_*` per basin and pooled (`_gsl`) with `n_snotel_sites`; `res_kaf_*` per basin and `res_kaf_total` with `n_reservoirs`; `inflow_kaf_*` per river and `inflow_kaf_total`; `breach_kaf`; `north_arm_ft` and `head_diff_ft` (south minus north) |
+| `monthly_covariates` | Derived | One row per complete month: `swe_eom_*`, `prec_wy_eom_*`, `swe_pct_median_*`, `prec_pct_median_*`, `sms_eom_*` per basin and pooled (`_gsl`) with `n_snotel_sites`; `res_kaf_*` per basin and `res_kaf_total` with `n_reservoirs`; `inflow_kaf_*` per river and `inflow_kaf_total`; `breach_kaf`; `north_arm_ft` and `head_diff_ft` (south minus north); `tavg_f_gsl` and `prcp_in_gsl` |
 
 Snowpack at month end is the mean over sites reporting that day. The raw mean drifts as the roster grows (18 sites in 1979, 55 in 2026), which the percent-of-median columns avoid; young sites without a 30-year median count in the mean but not in the percent. Reservoir storage is summed over the stations reporting, so sums before a dam was built are smaller for a physical reason. The south-arm level is also managed at the causeway: the breach berm was raised in 2022, overtopped in 2023, and HB1001 (2025) lets the state raise it to 4,192 ft when the south arm is at or below 4,190 ft; `head_diff_ft` and `breach_kaf` carry that signal.
 

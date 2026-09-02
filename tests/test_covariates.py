@@ -1,8 +1,8 @@
 import duckdb
 import pytest
 
+from src.pipeline import climate, usgs
 from src.pipeline import covariates as cov
-from src.pipeline import usgs
 
 CFG = {
     "snotel": {
@@ -12,6 +12,7 @@ CFG = {
     },
     "reservoirs": {"states": ["UT"], "start": "2020-01-01"},
     "nrcs_forecasts": {"station": "10010000:UT:USGS", "start": "2020-01-01"},
+    "climdiv": {"state": "42", "divisions": ["03", "05"]},
     "usgs_discharge": {
         "inflow": {"bear": "10126000"},
         "exchange": {"breach": "10010020"},
@@ -33,8 +34,24 @@ class FakeResponse:
     def json(self):
         return self.payload
 
+    @property
+    def text(self):
+        return self.payload
+
+
+CLIMDIV_LISTING = "climdiv-tmpcdv-v1.0.0-20200206 climdiv-pcpndv-v1.0.0-20200206"
+CLIMDIV_LINE = "{}{}2020  30.00  32.00" + " -99.90" * 10
+
 
 def fake_get(url, params=None, timeout=None):
+    if url == climate.CLIMDIV:
+        return FakeResponse(CLIMDIV_LISTING)
+    if url.startswith(climate.CLIMDIV):
+        element = "tmpc" if "tmpc" in url else "pcpn"
+        code = {"tmpc": "02", "pcpn": "01"}[element]
+        return FakeResponse(
+            "\n".join(CLIMDIV_LINE.format(s, code) for s in ("4203", "4205", "4201", "0801"))
+        )
     if url.endswith("/forecasts"):
         return FakeResponse(
             [
@@ -200,6 +217,27 @@ def test_nrcs_forecasts_one_row_per_exceedance(db):
     ).fetchall()
     assert len(rows) == 3
     assert rows[1][1:] == ("04-01", 50, 300.0, 450.0) and str(rows[1][0]) == "2020-02-01"
+
+
+def test_climdiv_mean_of_divisions(db):
+    row = db.execute(
+        "SELECT tavg_f_gsl, prcp_in_gsl FROM monthly_covariates WHERE month = DATE '2020-01-01'"
+    ).fetchone()
+    assert row == (pytest.approx(30.0), pytest.approx(30.0))
+    assert db.execute("SELECT COUNT(*) FROM climdiv_monthly").fetchone()[0] == 4
+
+
+def test_climdiv_latest_file_and_parse():
+    assert climate.latest_file(
+        "x climdiv-tmpcdv-v1.0.0-20250101 climdiv-tmpcdv-v1.0.0-20250201", "tmpc"
+    )
+    assert climate.latest_file(
+        CLIMDIV_LISTING + " climdiv-tmpcdv-v1.0.0-20210101", "tmpc"
+    ).endswith("20210101")
+    rows = climate.parse_climdiv(CLIMDIV_LINE.format("4203", "02"), "42", ["03"], -99.9)
+    assert rows == [("2020-01-01", "03", 30.0), ("2020-02-01", "03", 32.0)]
+    line = "4203012020  1.50 -9.99" + " -9.99" * 10
+    assert climate.parse_climdiv(line, "42", ["03"], -9.99) == [("2020-01-01", "03", 1.5)]
 
 
 def test_percent_of_median_and_soil_moisture(db):
