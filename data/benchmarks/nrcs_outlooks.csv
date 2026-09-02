@@ -1,0 +1,10 @@
+issue_date,start_stage_ft,inflow_p50_kaf,inflow_pct_avg,rise_p50_ft,implied_peak_ft,actual_peak_ft,source_url,note
+2024-03-01,4194.1,1000,,1.2,4195.3,4195.2,https://www.ksl.com/article/50955308/great-salt-lakes-levels-are-now-as-high-as-last-years-peak-how-much-more-will-it-gain,"Most probable inflow reported as more than 1 million acre-feet; high scenario 1.4 million acre-feet and +1.5 ft"
+2024-04-01,4194.3,,,,4195.0,4195.2,https://greatsaltlakenews.org/latest-news/ksl-com/utah-seeks-to-maintain-great-salt-lake-levels-after-it-peaks-below-some-projections,"Reported as just over 4195 ft plus or minus roughly half a foot"
+2025-01-01,,615,,0.5,,4193.6,https://www.nrcs.usda.gov/sites/default/files/2025-01/WSOR_Jan_2025.pdf,"Rise range 0.0-1.16 ft; start stage not stated"
+2025-02-01,4192.8,360,50,0.83,4193.6,4193.6,https://www.nrcs.usda.gov/sites/default/files/2025-03/WSOR_Feb_2025.pdf,"Rise range 0.1-1.6 ft"
+2025-04-01,4193.4,590,83,0.58,4194.0,4193.6,https://www.uintahwater.org/home/news/april-1st-water-supply-outlook-report-utah,"May-July inflow 330-1050 kaf; rise 0.04-1.12 ft; stated as around 4194 plus or minus half a foot"
+2025-05-01,4193.4,320,64,0.3,4193.7,4193.6,https://www.utahfarmbureau.org/Article/USDA-Snow-Survey-Provides-Updated-Water-Supply-Outlook-Report-for-Utah,"Inflow printed as 32,000 acre-feet (64% of average), assumed 320 kaf; rise 0.1-0.7 ft"
+2026-01-01,4192.0,,,,4192.4,4192.6,https://utahnewsdispatch.com/2026/04/29/great-salt-lake-already-reached-max-height-2026/,"Three scenarios reported: peak close to 4192.4, barely rise, or exceed 4193; central taken"
+2026-03-01,4192.0,260,36,,,4192.6,https://townlift.com/2026/03/utah-snowpack-hovers-near-record-lows-as-water-officials-warn-of-poor-runoff-season/,"Rise stated as anywhere from not at all to an additional foot"
+2026-04-01,4192.3,183,26,0.0,4192.3,4192.6,https://ironcountytoday.com/2026/04/09/april-1st-water-supply-outlook-report-for-utah/,"183 kaf is the 70% exceedance value; range 125 kaf (90%) to 465 kaf (10%); no change at 50% and 70%"

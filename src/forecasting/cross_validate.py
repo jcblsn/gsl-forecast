@@ -10,6 +10,12 @@ from experiment_tracker import ExperimentTracker
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
+from src.forecasting.headline import (
+    headline_metrics,
+    headline_scores,
+    print_headline,
+    summarize_headline,
+)
 from src.forecasting.registry import BASELINE, all_forecasters
 
 
@@ -111,6 +117,7 @@ def log_to_tracker(
     forecasters: list[Forecaster],
     cv_df: pd.DataFrame,
     summary: pd.DataFrame,
+    headline_summary: pd.DataFrame | None = None,
 ) -> None:
     for forecaster in forecasters:
         run_id = tracker.start_run(exp_id)
@@ -129,6 +136,8 @@ def log_to_tracker(
             metrics[f"mae_h{h}"] = float(row["mae"])
             metrics[f"rmse_h{h}"] = float(row["rmse"])
             metrics[f"mae_ratio_h{h}"] = float(row["mae_ratio"])
+        if headline_summary is not None:
+            metrics.update(headline_metrics(headline_summary, forecaster.name))
         tracker.log_metrics(run_id, metrics)
         tracker.end_run(run_id)
 
@@ -183,6 +192,8 @@ def run_cross_validation(
         results.append(evaluate_at_cutoff(data, cutoff, forecasters, horizon, train_start))
     cv_df = pd.concat(results, ignore_index=True)
     summary = summarize(cv_df)
+    headline = headline_scores(cv_df, data)
+    headline_summary = summarize_headline(headline)
 
     stamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
     cutoff_desc = "all month-end" if n_cutoffs is None else f"{n_cutoffs} random"
@@ -202,10 +213,11 @@ def run_cross_validation(
     }
     for k, v in tags.items():
         tracker.log_tag("experiment", exp_id, k, v)
-    log_to_tracker(tracker, exp_id, forecasters, cv_df, summary)
+    log_to_tracker(tracker, exp_id, forecasters, cv_df, summary, headline_summary)
 
     per_cutoff_path = os.path.join(output_dir, f"cv_results_{stamp}.parquet")
     cv_df.to_parquet(per_cutoff_path, index=False)
+    headline.to_parquet(os.path.join(output_dir, f"headline_{stamp}.parquet"), index=False)
     logging.info(f"Saved per-cutoff results to {per_cutoff_path} (experiment {exp_id})")
 
     if make_plots:
@@ -217,6 +229,7 @@ def run_cross_validation(
         logging.info(f"Saved CV plots to {output_dir}")
 
     print_summary(summary, horizon)
+    print_headline(headline_summary)
     return summary
 
 

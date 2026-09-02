@@ -74,7 +74,7 @@ def test_cv_random_cutoffs_respects_n(project):
         forecasters=[NaiveForecaster(method="last")],
         make_plots=False,
     )
-    per_cutoff = pd.read_parquet(next((project["tmp"] / "outputs").glob("*.parquet")))
+    per_cutoff = pd.read_parquet(next((project["tmp"] / "outputs").glob("cv_results_*.parquet")))
     assert per_cutoff["cutoff"].nunique() == 4
     assert len(summary) == 6
 

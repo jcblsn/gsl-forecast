@@ -165,7 +165,9 @@ cython_debug/
 .DS_Store
 .vscode/
 
-data/
+data/*
+!data/benchmarks/
+!data/external/
 .context/
 outputs/
 *.png
