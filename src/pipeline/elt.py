@@ -7,6 +7,7 @@ import duckdb
 import requests
 
 from src.config import load_config
+from src.pipeline.covariates import run_covariates
 
 
 def ingest_continuous(conn: duckdb.DuckDBPyConnection, source_config: dict) -> None:
@@ -147,7 +148,7 @@ def transform(conn: duckdb.DuckDBPyConnection) -> None:
     """)
 
 
-def run_pipeline(config_path: str | None = None) -> None:
+def run_pipeline(config_path: str | None = None, skip_covariates: bool = False) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     config = load_config(config_path)
@@ -161,6 +162,8 @@ def run_pipeline(config_path: str | None = None) -> None:
             ingest_continuous(conn, config["sources"]["usgs_water_surface_elevation_continuous"])
             ingest_daily(conn, config["sources"]["usgs_water_surface_elevation_daily"])
             transform(conn)
+            if "covariates" in config and not skip_covariates:
+                run_covariates(conn, config)
 
             conn.execute("COMMIT")
             conn.execute("VACUUM")
@@ -175,8 +178,9 @@ def run_pipeline(config_path: str | None = None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch USGS data into the local DuckDB")
     parser.add_argument("--config", help="Path to config file")
+    parser.add_argument("--skip-covariates", action="store_true")
     args = parser.parse_args()
-    run_pipeline(args.config)
+    run_pipeline(args.config, skip_covariates=args.skip_covariates)
 
 
 if __name__ == "__main__":

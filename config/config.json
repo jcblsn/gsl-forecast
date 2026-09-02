@@ -22,5 +22,28 @@
       "history_years": 15,
       "cutoffs": "all"
     }
+  },
+  "covariates": {
+    "snotel": {
+      "states": [
+        "UT",
+        "WY",
+        "ID"
+      ],
+      "basins": {
+        "1601": "bear",
+        "160201": "weber",
+        "160202": "provo_jordan"
+      },
+      "start": "1978-10-01"
+    },
+    "usgs_discharge": {
+      "sites": {
+        "bear": "10127110",
+        "weber": "10141000",
+        "jordan": "10170490"
+      },
+      "start": "1900-01-01"
+    }
   }
 }
