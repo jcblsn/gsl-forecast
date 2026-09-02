@@ -65,6 +65,10 @@ class InflowChainForecaster(Forecaster):
         self.is_fitted = True
         return self
 
+    def inflow_forecast(self, h: int) -> float:
+        """Stage one: the tributary inflow (kaf) predicted for lead h from the snowpack now."""
+        return self._inflow(h)
+
     def _inflow(self, h: int) -> float:
         df = self._data
         last = df.iloc[-1]
