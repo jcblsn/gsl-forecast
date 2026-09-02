@@ -122,3 +122,24 @@ class TestSummarize:
         base = summary[summary["model"] == "naive_last"]
         assert (base["mae_ratio"] - 1.0).abs().max() < 1e-12
         assert set(summary.columns) >= {"model", "h", "mae", "rmse", "mae_ratio"}
+
+
+def test_non_finite_predictions_are_dropped(caplog):
+    import numpy as np
+    import pandas as pd
+
+    from src.forecasting.cross_validate import evaluate_at_cutoff
+    from src.forecasting.univariate.naive import NaiveForecaster
+
+    class NanForecaster(NaiveForecaster):
+        def predict(self, h, start_date=None):
+            out = super().predict(h, start_date)
+            out["pred"] = np.nan
+            return out
+
+    months = pd.date_range("2000-01-01", periods=48, freq="MS")
+    data = pd.DataFrame({"month": months, "avg_elevation": 4190.0 + np.arange(48) * 0.01})
+    bad = NanForecaster(method="last")
+    bad.name = "nan_model"
+    out = evaluate_at_cutoff(data, months[30], [NaiveForecaster(method="last"), bad], 6)
+    assert set(out["model"]) == {"naive_last"}

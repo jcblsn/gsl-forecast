@@ -3,6 +3,7 @@ import logging
 import os
 import random
 
+import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 from experiment_tracker import ExperimentTracker
@@ -65,6 +66,9 @@ def evaluate_at_cutoff(
             preds = forecaster.fit(train).predict(h=horizon).reset_index(drop=True)
         except Exception as e:
             logging.warning(f"Forecaster {forecaster.name} failed at cutoff {cutoff}: {e}")
+            continue
+        if not np.isfinite(preds["pred"].to_numpy(dtype=float)).all():
+            logging.warning(f"Forecaster {forecaster.name} gave non-finite values at {cutoff}")
             continue
         preds["h"] = range(1, len(preds) + 1)
         merged = preds.merge(actuals[["h", "avg_elevation"]], on="h")

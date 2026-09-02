@@ -301,8 +301,8 @@ def transform_covariates(
     per_basin = {
         "swe_eom": "swe",
         "prec_wy_eom": "prec",
-        "swe_pct_median": "100 * swe_sum / swe_med",
-        "prec_pct_median": "100 * prec_sum / prec_med",
+        "swe_pct_median": "100 * swe_sum / NULLIF(swe_med, 0)",
+        "prec_pct_median": "100 * prec_sum / NULLIF(prec_med, 0)",
         "sms_eom": "sms",
     }
     basin_cols = ",\n".join(
@@ -334,8 +334,8 @@ def transform_covariates(
                    {basin_cols},
                    SUM(swe * n) / SUM(n) AS swe_eom_gsl,
                    SUM(prec * n) / SUM(n) AS prec_wy_eom_gsl,
-                   100 * SUM(swe_sum) / SUM(swe_med) AS swe_pct_median_gsl,
-                   100 * SUM(prec_sum) / SUM(prec_med) AS prec_pct_median_gsl,
+                   100 * SUM(swe_sum) / NULLIF(SUM(swe_med), 0) AS swe_pct_median_gsl,
+                   100 * SUM(prec_sum) / NULLIF(SUM(prec_med), 0) AS prec_pct_median_gsl,
                    SUM(sms * n) / SUM(n) AS sms_eom_gsl,
                    SUM(n) AS n_snotel_sites
             FROM snow GROUP BY month
