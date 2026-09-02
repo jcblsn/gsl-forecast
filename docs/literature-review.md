@@ -132,26 +132,7 @@ Takeaway: given observed inflow and precipitation, the level is essentially dete
 
 ## 8. Comparison with our current results
 
-Our best model is Holt-Winters with damped additive trend and additive 12-month seasonality, walk-forward CV over 169 month-end cutoffs from September 2011 to August 2025, training from 1960.
-
-| Horizon | ETS damped MAE | ETS damped RMSE | naive_last RMSE |
-|---|---|---|---|
-| 1 mo | 0.14 ft (4.3 cm) | 0.19 ft (5.8 cm) | 0.41 ft (12.6 cm) |
-| 3 mo | 0.44 ft (13.5 cm) | 0.59 ft (17.9 cm) | 1.09 ft (33.2 cm) |
-| 6 mo | 0.81 ft (24.8 cm) | 1.00 ft (30.6 cm) | 1.60 ft (48.6 cm) |
-| 12 mo | 1.21 ft (36.8 cm) | 1.47 ft (44.9 cm) | 1.49 ft (45.3 cm) |
-
-Against the annual-tendency literature (Gillies 2015): our 12-month RMSE of 44.9 cm on level is the same quantity as their RMSE on annual tendency. Their AR-only baseline scored 40.2 cm/yr and the tree-ring ARX 32.1 cm/yr, on a 2001-2005 hold-out of five points. Our window includes 2022-2023 (record low, then a 5.5 ft rise), where our 12-month MAE was 2.75 ft in 2022. Excluding that regime our numbers are in the same range as theirs. Conclusion: at 12 months we are at rough parity with the published statistical models, and like them we are barely better than persistence.
-
-Against the NRCS spring outlook: the closest CV analogue to the April 1 outlook is our March cutoff forecasting June (h=3).
-
-| Year | NRCS April outlook error on peak | ETS damped, Mar cutoff to Jun | naive_last, Mar cutoff to Jun |
-|---|---|---|---|
-| 2024 | 0.1 ft | 0.35 ft | 0.80 ft |
-| 2025 | 0.4 ft | 0.89 ft | 0.27 ft |
-| 2026 | 0.3 ft | not in CV window | |
-
-Over 2012-2025 our March-cutoff June MAE is 0.75 ft (ETS) and 0.76 ft (naive), with 2.19 ft in 2023. NRCS has not been tested on a 2023-type year. From a January cutoff our June MAE is 1.13 ft; NRCS's January 2025 outlook was within 0.1 ft. A snowpack-driven model should cut our winter-cutoff spring errors by roughly half based on these few seasons.
+The README "Current results" section holds the one maintained set of numbers: walk-forward MAE by lead for the univariate and snowpack models, the spring-peak and water-year-end errors by issue month, and the refit comparison against the NRCS record. At 12 months the univariate models sit at rough parity with the published statistical work and barely beat persistence. From a January issue the snowpack models roughly halve the univariate spring-peak error.
 
 ## 9. Implications for the multivariate implementation
 

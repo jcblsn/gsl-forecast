@@ -2,15 +2,18 @@
 
 The two numbers people act on are the spring peak (April-June maximum of the monthly mean)
 and the water-year-end level (the September mean). This module extracts them from per-cutoff
-CV predictions for cutoffs that correspond to the operational issue dates (data through
-December-April, i.e. outlooks issued January 1 through May 1).
+CV predictions for cutoffs that correspond to the operational issue dates: the peak from
+outlooks issued January 1 through May 1 (the NRCS schedule), the water-year end from
+January 1 through August 1, since the summer decline is the product nobody else issues.
 """
 
 import pandas as pd
 
 PEAK_MONTHS = (4, 5, 6)
 WY_END_MONTH = 9
-ISSUE_LABELS = {1: "jan", 2: "feb", 3: "mar", 4: "apr", 5: "may"}
+PEAK_ISSUES = {1: "jan", 2: "feb", 3: "mar", 4: "apr", 5: "may"}
+ISSUE_LABELS = {**PEAK_ISSUES, 6: "jun", 7: "jul", 8: "aug"}
+TARGET_ISSUES = {"peak": PEAK_ISSUES, "wy_end": ISSUE_LABELS}
 
 
 def issue_month(cutoff: pd.Timestamp) -> int:
@@ -41,6 +44,8 @@ def headline_scores(cv_df: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
         actual = pd.Series(grp["actual"].values, index=pd.DatetimeIndex(months))
         known = obs[(obs.index <= cutoff) & (obs.index.year == year)]
         for target, wanted in (("peak", PEAK_MONTHS), ("wy_end", (WY_END_MONTH,))):
+            if issue not in TARGET_ISSUES[target]:
+                continue
             sel = [pd.Timestamp(year=year, month=m, day=1) for m in wanted]
             sel = [pd.Timestamp(s).to_period("M") for s in sel]
             p_future = pred[pred.index.to_period("M").isin(sel)]

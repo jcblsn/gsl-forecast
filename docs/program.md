@@ -1,7 +1,10 @@
 # Autoresearch program for gsl-forecast
 
 This file is the research strategy for an agent-driven improvement loop, in the pattern of
-karpathy/autoresearch (see `autoresearch-memo.md`).
+karpathy/autoresearch: one editable asset, one scalar metric, one fixed harness. The loop
+fits the multivariate layer and not the univariate baselines, whose design space is too
+small to search. The data pipeline is not part of the loop: a new source is a reviewed
+pipeline change first, and only then a feature the loop may use.
 
 ## The three primitives
 
@@ -35,10 +38,24 @@ karpathy/autoresearch (see `autoresearch-memo.md`).
 
 ## Ideas queue
 
-- Percent-of-median SWE per basin instead of raw inches (site roster changes over time).
-- Separate Bear/Weber/Provo SWE terms instead of the basin-weighted mean.
-- Soil moisture and water-year precipitation from SNOTEL as runoff-efficiency terms.
-- Issued NRCS/CBRFC inflow exceedance forecasts (`data/external/`) as a covariate in season.
-- Bathymetry (USGS elevation-area-volume table) so `inflow_chain` uses real area for
-  evaporation instead of the elevation proxy.
+Columns already in `monthly_covariates` (see the README data section):
+
+- `swe_pct_median_*` and `prec_pct_median_*` in place of raw inches (the site roster grew
+  from 18 to 55 sites, so raw means drift).
+- Separate Bear/Weber/Provo-Jordan terms instead of the pooled index.
+- `res_kaf_total` or per-basin reservoir storage at the cutoff as the runoff-efficiency
+  term; expect the largest gains at January-March issues.
+- `sms_eom_gsl` (8-inch soil moisture, from 1999) for autumn cutoffs.
+- `head_diff_ft` (south minus north arm) in the `inflow_chain` bucket step, since causeway
+  berm management moves water between the arms.
 - Stacking: regress `ets_damped_s12` residuals at each horizon on snowpack anomalies.
+- A blend that follows `swe_regression` at leads 1-12 and moves to `ets_damped_s12` by
+  lead 24, registered as its own model so it is exported and verified.
+
+Needs pipeline work first:
+
+- Bathymetry so `inflow_chain` uses lake area for evaporation instead of the level proxy.
+- The issued NRCS inflow forecast (`nrcs_inflow_forecasts`, from 2024) as an in-season
+  anchor for `inflow_chain` stage one once there are enough seasons to fit.
+- Climate division temperature and precipitation (NOAA nClimDiv) for the evaporation term.
+- Climate indices (NINO4, PDO, PNA, SOI) for leads beyond 12 months.

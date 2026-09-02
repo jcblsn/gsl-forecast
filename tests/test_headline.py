@@ -59,8 +59,12 @@ def test_april_cutoff_uses_observed_april(seasonal_data):
     assert peak["actual"] == pytest.approx(4197.0)
 
 
-def test_non_issue_cutoffs_are_skipped(seasonal_data):
+def test_summer_cutoffs_score_only_the_water_year_end(seasonal_data):
     cutoff = pd.Timestamp("2020-07-01")
+    cv = evaluate_at_cutoff(seasonal_data, cutoff, [NaiveForecaster(method="last")], horizon=12)
+    scores = headline_scores(cv, seasonal_data)
+    assert list(scores["target"]) == ["wy_end"] and scores.iloc[0]["issue"] == "aug"
+    cutoff = pd.Timestamp("2020-08-01")
     cv = evaluate_at_cutoff(seasonal_data, cutoff, [NaiveForecaster(method="last")], horizon=12)
     assert headline_scores(cv, seasonal_data).empty
 
