@@ -113,32 +113,50 @@ uv run gsl-plot [--history-years 10] [--output outputs/gsl_forecast.png]
 
 ## Current results
 
-These results predate the move to a 24-month horizon and will be refreshed on the next CV run.
+Walk-forward CV, 157 month-end cutoffs (August 2011 to August 2024), 24-month horizon, training from 1960, data through August 2026. MAE in feet; ratio is MAE divided by `naive_last` MAE at the same horizon. CRPS is the mean pinball loss over q05-q95 with intervals taken from other years' errors (leave-one-year-out).
 
-Walk-forward CV, 169 month-end cutoffs (September 2011 to August 2025), 12-month horizon, training from 1960, data through August 2026. MAE in feet; ratio is MAE divided by `naive_last` MAE at the same horizon.
+| Horizon | swe_regression | inflow_chain | ets_damped_s12 | naive_last | Ratio (swe) |
+|---|---|---|---|---|---|
+| 1 | 0.13 | 0.15 | 0.14 | 0.34 | 0.37 |
+| 3 | 0.31 | 0.37 | 0.45 | 0.90 | 0.35 |
+| 6 | 0.55 | 0.67 | 0.82 | 1.33 | 0.41 |
+| 9 | 0.80 | 0.97 | 1.08 | 1.26 | 0.64 |
+| 12 | 1.11 | 1.31 | 1.24 | 1.28 | 0.86 |
+| 18 | 1.65 | 1.87 | 1.65 | 1.91 | 0.86 |
+| 24 | 2.08 | 2.36 | 1.92 | 1.80 | 1.16 |
 
-| Horizon | ets_damped_s12 | naive_last | Ratio |
-|---|---|---|---|
-| 1 | 0.14 | 0.34 | 0.42 |
-| 3 | 0.44 | 0.90 | 0.49 |
-| 6 | 0.81 | 1.32 | 0.62 |
-| 9 | 1.06 | 1.24 | 0.86 |
-| 12 | 1.21 | 1.28 | 0.95 |
+CRPS at h=6: swe_regression 0.19, inflow_chain 0.18, ets_damped_s12 0.26, naive_last 0.40.
 
-`ets_damped_s12` is best at every horizon, but by 12 months it is within 5% of repeating the last value. Training from 1980 instead of 1960 changes nothing material.
+Headline scalars by issue date (MAE, ft). Issue date means the outlook made from data through the previous month, matching the NRCS schedule.
 
-Six-month MAE by month of cutoff shows where the univariate ceiling is:
+| Target | Issue | swe_regression | inflow_chain | ets_damped_s12 | naive_last |
+|---|---|---|---|---|---|
+| Spring peak | Jan 1 | 0.84 | 0.82 | 1.01 | 1.62 |
+| Spring peak | Feb 1 | 0.63 | 0.58 | 0.87 | 1.39 |
+| Spring peak | Mar 1 | 0.44 | 0.40 | 0.70 | 1.03 |
+| Spring peak | Apr 1 | 0.27 | 0.25 | 0.41 | 0.62 |
+| Spring peak | May 1 | 0.13 | 0.12 | 0.18 | 0.29 |
+| Water-year end | Jan 1 | 0.91 | 1.09 | 1.28 | 1.23 |
+| Water-year end | Apr 1 | 0.43 | 0.73 | 0.94 | 1.58 |
 
-| Cutoff month | ets_damped_s12 | naive_last |
-|---|---|---|
-| Dec | 1.24 | 1.29 |
-| Jan | 1.22 | 1.04 |
-| Feb | 1.13 | 1.19 |
-| Apr | 0.78 | 1.92 |
-| May | 0.60 | 2.02 |
-| Aug | 0.34 | 0.30 |
+Snowpack resolves the winter case: from a January 1 issue the univariate model's peak error was no better than naive; with month-end SWE it roughly halves. Beyond 18 months the covariate models lose to the univariate ones, since snowpack known today says nothing about the next winter, so the 24-month product should blend toward `ets_damped_s12` at long leads (on the roadmap).
 
-From a winter cutoff the model has to guess the size of the coming spring rise and does no better than naive. By April the rise is underway and seasonality carries it. Snowpack and streamflow data are what resolve the winter case, which is the motivation for the multivariate work in `autoresearch-memo.md`.
+### Against the NRCS record
+
+`gsl-benchmark --refit` fits a model at each published NRCS issue date and scores its spring peak against the peak of the monthly mean (NRCS is scored against the same, last column). Errors in feet, signed (forecast minus actual).
+
+| Issue | NRCS | swe_regression | inflow_chain | ets_damped_s12 |
+|---|---|---|---|---|
+| 2024-03-01 | +0.30 | -0.47 | -0.17 | -0.19 |
+| 2024-04-01 | 0.00 | +0.04 | +0.21 | +0.19 |
+| 2025-02-01 | +0.07 | -0.09 | +0.24 | +0.43 |
+| 2025-04-01 | +0.47 | +0.20 | +0.42 | +0.41 |
+| 2025-05-01 | +0.17 | +0.01 | +0.12 | +0.15 |
+| 2026-01-01 | +0.14 | +0.37 | +0.46 | +0.50 |
+| 2026-04-01 | +0.04 | -0.11 | +0.07 | +0.38 |
+| Mean absolute | 0.17 | 0.18 | 0.24 | 0.32 |
+
+Seven issues is too few to rank anyone. Two caveats favour the models: they use today's data vintage rather than what was available at the time, and the actual here is the monthly-mean peak rather than the daily peak NRCS is usually judged on. Two favour NRCS: its numbers were published in advance, and it stops in May while these models also produce the autumn low and the next year.
 
 ## Querying Results
 

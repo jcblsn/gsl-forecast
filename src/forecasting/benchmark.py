@@ -7,7 +7,10 @@ import os
 import pandas as pd
 
 from src.config import load_config
-from src.forecasting.headline import ISSUE_LABELS
+from src.forecasting.cross_validate import evaluate_at_cutoff
+from src.forecasting.data import load_monthly_data
+from src.forecasting.headline import ISSUE_LABELS, headline_scores
+from src.forecasting.registry import all_forecasters
 
 BENCHMARK_CSV = os.path.join("data", "benchmarks", "nrcs_outlooks.csv")
 MODEL = "ets_damped_s12"
@@ -67,18 +70,47 @@ def compare(headline: pd.DataFrame, nrcs: pd.DataFrame, model: str = MODEL) -> p
     return pd.DataFrame(rows)
 
 
+def refit_at_issues(nrcs: pd.DataFrame, db_path: str, train_start: str | None, model: str):
+    """Fit the model at each NRCS issue date and score its spring peak, no CV run needed.
+
+    Uses the data as it stands today rather than the vintage available at the time, so this
+    is a hindcast of the method, not a record of what was issued.
+    """
+    data = load_monthly_data(db_path, train_start)
+    forecaster = next(f for f in all_forecasters() if f.name == model)
+    frames = []
+    for issue in pd.to_datetime(nrcs["issue_date"]).unique():
+        cutoff = pd.Timestamp(issue) - pd.DateOffset(months=1)
+        if cutoff not in set(data["month"]):
+            continue
+        frames.append(evaluate_at_cutoff(data, cutoff, [forecaster], 8, train_start))
+    cv = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    return headline_scores(cv, data)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare CV spring-peak errors with NRCS")
     parser.add_argument("--headline", help="headline_*.parquet from gsl-cv (default: latest)")
     parser.add_argument("--benchmark", default=BENCHMARK_CSV)
     parser.add_argument("--model", default=MODEL)
+    parser.add_argument(
+        "--refit",
+        action="store_true",
+        help="Refit the model at each NRCS issue date instead of reading CV output",
+    )
     parser.add_argument("--config")
     args = parser.parse_args()
-    output_dir = load_config(args.config)["forecasting"]["output_dir"]
-    path = args.headline or latest_headline_parquet(output_dir)
-    headline = pd.read_parquet(path)
+    config = load_config(args.config)
     nrcs = pd.read_csv(args.benchmark)
-    print(f"Headline scores: {path}")
+    if args.refit:
+        headline = refit_at_issues(
+            nrcs, config["database"]["path"], config["forecasting"]["train_start"], args.model
+        )
+        print(f"Refit {args.model} at each issue date")
+    else:
+        path = args.headline or latest_headline_parquet(config["forecasting"]["output_dir"])
+        headline = pd.read_parquet(path)
+        print(f"Headline scores: {path}")
     print(compare(headline, nrcs, args.model).to_string(index=False))
     print("\nNRCS actuals are daily peaks; our actuals are peaks of the monthly mean.")
 
