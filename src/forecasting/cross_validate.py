@@ -16,6 +16,7 @@ from src.forecasting.headline import (
     print_headline,
     summarize_headline,
 )
+from src.forecasting.quantiles import leave_one_year_out_scores
 from src.forecasting.registry import BASELINE, all_forecasters
 
 
@@ -127,6 +128,9 @@ def log_to_tracker(
             metrics[f"mae_h{h}"] = float(row["mae"])
             metrics[f"rmse_h{h}"] = float(row["rmse"])
             metrics[f"mae_ratio_h{h}"] = float(row["mae_ratio"])
+            if "crps" in row and pd.notna(row["crps"]):
+                metrics[f"crps_h{h}"] = float(row["crps"])
+                metrics[f"cov90_h{h}"] = float(row["cov90"])
         if headline_summary is not None:
             metrics.update(headline_metrics(headline_summary, forecaster.name))
         tracker.log_metrics(run_id, metrics)
@@ -138,6 +142,11 @@ def print_summary(summary: pd.DataFrame, horizon: int) -> None:
     pivot.columns = [f"h={c}" for c in pivot.columns]
     print("\nMean absolute error (ft) by model and horizon:")
     print(pivot.to_string())
+    if "crps" in summary.columns:
+        crps = summary.pivot(index="model", columns="h", values="crps").round(3)
+        crps.columns = [f"h={c}" for c in crps.columns]
+        print("\nCRPS (ft, leave-one-year-out empirical intervals) by model and horizon:")
+        print(crps.to_string())
     print("\nBest model at each horizon (MAE ratio to naive_last in parentheses):")
     for h in range(1, horizon + 1):
         best = summary[summary["h"] == h].sort_values("mae").iloc[0]
@@ -185,6 +194,8 @@ def run_cross_validation(
     summary = summarize(cv_df)
     headline = headline_scores(cv_df, data)
     headline_summary = summarize_headline(headline)
+    prob = leave_one_year_out_scores(cv_df)
+    summary = summary.merge(prob, on=["model", "h"], how="left")
 
     stamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
     cutoff_desc = "all month-end" if n_cutoffs is None else f"{n_cutoffs} random"
