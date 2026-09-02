@@ -31,6 +31,18 @@
       },
       "start": "1978-10-01"
     },
+    "reservoirs": {
+      "states": [
+        "UT",
+        "WY",
+        "ID"
+      ],
+      "start": "1900-01-01"
+    },
+    "nrcs_forecasts": {
+      "station": "10010000:UT:USGS",
+      "start": "1986-01-01"
+    },
     "usgs_discharge": {
       "inflow": {
         "bear": "10126000",

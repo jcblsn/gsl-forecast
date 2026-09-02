@@ -25,7 +25,14 @@ AWDB = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1"
 DISCHARGE_PARAMETER = "00060"
 ELEVATION_PARAMETER = "62614"
 NORTH_ARM_TABLE = "usgs_north_arm_elevation_daily"
-SNOTEL_ELEMENTS = ("WTEQ", "PREC")
+SNOTEL_ELEMENTS = ("WTEQ", "PREC", "SMS:-8")
+SNOTEL_COLUMNS = (
+    "wteq_in",
+    "prec_in",
+    "sms_8_pct",
+    "wteq_median_in",
+    "prec_median_in",
+)
 
 
 def basin_for_huc(huc: str, basins: dict[str, str]) -> str | None:
@@ -35,14 +42,16 @@ def basin_for_huc(huc: str, basins: dict[str, str]) -> str | None:
     return None
 
 
-def fetch_snotel_sites(states: list[str], basins: dict[str, str]) -> list[dict]:
+def fetch_awdb_stations(
+    states: list[str], network: str, basins: dict[str, str], elements: str | None = None
+) -> list[dict]:
+    """Active AWDB stations of one network (SNTL, BOR) inside the configured hydrologic units."""
     sites = []
     for state in states:
-        resp = get_with_retry(
-            f"{AWDB}/stations",
-            params={"stationTriplets": f"*:{state}:SNTL", "activeOnly": "true"},
-            timeout=120,
-        )
+        params = {"stationTriplets": f"*:{state}:{network}", "activeOnly": "true"}
+        if elements:
+            params["elements"] = elements
+        resp = get_with_retry(f"{AWDB}/stations", params=params, timeout=120)
         for s in resp.json():
             basin = basin_for_huc(str(s.get("huc", "")), basins)
             if basin:
@@ -62,6 +71,8 @@ def fetch_snotel_sites(states: list[str], basins: dict[str, str]) -> list[dict]:
 
 
 def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]:
+    """Daily SWE, water-year precipitation and 8-inch soil moisture per site, with the
+    1991-2020 median of SWE and precipitation where AWDB has one (young sites have none)."""
     resp = get_with_retry(
         f"{AWDB}/data",
         params={
@@ -70,6 +81,7 @@ def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]
             "duration": "DAILY",
             "beginDate": start,
             "endDate": end,
+            "centralTendencyType": "MEDIAN",
         },
         timeout=300,
     )
@@ -79,9 +91,14 @@ def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]
         for series in station.get("data", []):
             element = series["stationElement"]["elementCode"]
             for v in series.get("values", []):
-                key = (triplet, v["date"])
-                rows.setdefault(key, {e: None for e in SNOTEL_ELEMENTS})[element] = v.get("value")
-    return [(t, d, vals["WTEQ"], vals["PREC"]) for (t, d), vals in rows.items()]
+                vals = rows.setdefault((triplet, v["date"]), dict.fromkeys(SNOTEL_COLUMNS))
+                if element == "WTEQ":
+                    vals["wteq_in"], vals["wteq_median_in"] = v.get("value"), v.get("median")
+                elif element == "PREC":
+                    vals["prec_in"], vals["prec_median_in"] = v.get("value"), v.get("median")
+                elif element == "SMS":
+                    vals["sms_8_pct"] = v.get("value")
+    return [(t, d, *(vals[c] for c in SNOTEL_COLUMNS)) for (t, d), vals in rows.items()]
 
 
 def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
@@ -92,13 +109,19 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
             latitude FLOAT, longitude FLOAT, begin_date DATE
         )
     """)
-    conn.execute("""
+    tables = {r[0] for r in conn.execute("SHOW TABLES").fetchall()}
+    if "snotel_daily" in tables:
+        cols = {r[0] for r in conn.execute("DESCRIBE snotel_daily").fetchall()}
+        if not set(SNOTEL_COLUMNS) <= cols:
+            logging.warning("snotel_daily has an old schema; rebuilding it from the source")
+            conn.execute("DROP TABLE snotel_daily")
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS snotel_daily (
-            station_triplet VARCHAR, d DATE, wteq_in FLOAT, prec_in FLOAT,
+            station_triplet VARCHAR, d DATE, {" FLOAT, ".join(SNOTEL_COLUMNS)} FLOAT,
             PRIMARY KEY (station_triplet, d)
         )
     """)
-    sites = fetch_snotel_sites(cfg["states"], cfg["basins"])
+    sites = fetch_awdb_stations(cfg["states"], "SNTL", cfg["basins"])
     conn.executemany(
         "INSERT OR REPLACE INTO snotel_sites VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS DATE))",
         [tuple(s.values()) for s in sites],
@@ -114,12 +137,119 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         ).fetchone()[0]
         start = cfg["start"] if max_d is None else str(max_d - timedelta(days=7))
         rows = fetch_snotel_daily([triplet], start, end)
-        frame = pd.DataFrame(rows, columns=["station_triplet", "d", "wteq_in", "prec_in"])
+        frame = pd.DataFrame(rows, columns=["station_triplet", "d", *SNOTEL_COLUMNS])
         frame["d"] = pd.to_datetime(frame["d"]).dt.date
         upsert(conn, "snotel_daily", frame)
         total += len(rows)
         logging.info(f"SNOTEL {i}/{len(triplets)} {triplet}: {len(rows)} rows from {start}")
     logging.info(f"Upserted {total} SNOTEL daily rows")
+
+
+def fetch_reservoir_monthly(triplets: list[str], start: str) -> list[tuple[str, str, float]]:
+    """End-of-month reservoir storage (RESC, acre-feet) per station, in kaf."""
+    resp = get_with_retry(
+        f"{AWDB}/data",
+        params={
+            "stationTriplets": ",".join(triplets),
+            "elements": "RESC",
+            "duration": "MONTHLY",
+            "beginDate": start,
+            "endDate": str(date.today()),
+        },
+        timeout=300,
+    )
+    rows = []
+    for station in resp.json():
+        for series in station.get("data", []):
+            for v in series.get("values", []):
+                if v.get("value") is not None:
+                    month = f"{v['year']}-{v['month']:02d}-01"
+                    rows.append((station["stationTriplet"], month, v["value"] / 1000.0))
+    return rows
+
+
+def ingest_reservoirs(conn: duckdb.DuckDBPyConnection, cfg: dict, basins: dict[str, str]) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reservoir_sites (
+            station_triplet VARCHAR PRIMARY KEY,
+            name VARCHAR, basin VARCHAR, huc VARCHAR, elevation_ft FLOAT,
+            latitude FLOAT, longitude FLOAT, begin_date DATE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reservoir_monthly (
+            station_triplet VARCHAR, month DATE, storage_kaf FLOAT,
+            PRIMARY KEY (station_triplet, month)
+        )
+    """)
+    sites = fetch_awdb_stations(cfg["states"], "BOR", basins, elements="RESC")
+    conn.executemany(
+        "INSERT OR REPLACE INTO reservoir_sites VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS DATE))",
+        [tuple(s.values()) for s in sites],
+    )
+    max_month = conn.execute("SELECT MAX(month) FROM reservoir_monthly").fetchone()[0]
+    start = cfg["start"] if max_month is None else str(max_month - timedelta(days=95))
+    rows = fetch_reservoir_monthly([s["station_triplet"] for s in sites], start)
+    frame = pd.DataFrame(rows, columns=["station_triplet", "month", "storage_kaf"])
+    frame["month"] = pd.to_datetime(frame["month"]).dt.date
+    upsert(conn, "reservoir_monthly", frame)
+    logging.info(f"{len(sites)} reservoirs; upserted {len(rows)} monthly storage rows from {start}")
+
+
+def fetch_nrcs_forecasts(station: str, start: str) -> list[tuple]:
+    """Every published seasonal inflow forecast for one AWDB forecast point: publication
+    date, period, exceedance percent, kaf, and the period normal."""
+    resp = get_with_retry(
+        f"{AWDB}/forecasts",
+        params={
+            "stationTriplets": station,
+            "elementCodes": "SRVO",
+            "beginPublicationDate": start,
+            "endPublicationDate": str(date.today()),
+        },
+        timeout=120,
+    )
+    rows = []
+    for point in resp.json():
+        for f in point.get("data", []):
+            start_md, end_md = f["forecastPeriod"]
+            for pct, kaf in f.get("forecastValues", {}).items():
+                rows.append(
+                    (
+                        f["publicationDate"][:10],
+                        start_md,
+                        end_md,
+                        int(pct),
+                        kaf,
+                        f.get("periodNormal"),
+                    )
+                )
+    return rows
+
+
+def ingest_nrcs_forecasts(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS nrcs_inflow_forecasts (
+            publication_date DATE, period_start VARCHAR, period_end VARCHAR,
+            exceedance INTEGER, kaf FLOAT, normal_kaf FLOAT,
+            PRIMARY KEY (publication_date, period_start, exceedance)
+        )
+    """)
+    rows = fetch_nrcs_forecasts(cfg["station"], cfg["start"])
+    frame = pd.DataFrame(
+        rows,
+        columns=[
+            "publication_date",
+            "period_start",
+            "period_end",
+            "exceedance",
+            "kaf",
+            "normal_kaf",
+        ],
+    )
+    frame["publication_date"] = pd.to_datetime(frame["publication_date"]).dt.date
+    upsert(conn, "nrcs_inflow_forecasts", frame)
+    logging.info(f"Upserted {len(rows)} NRCS inflow forecast rows for {cfg['station']}")
 
 
 def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
@@ -144,9 +274,15 @@ def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         logging.info(f"{river} ({site}): upserted {len(rows)} discharge rows from {start}")
 
 
-def transform_covariates(conn: duckdb.DuckDBPyConnection, discharge: dict) -> None:
-    """Monthly, complete months only: month-end basin SWE and precipitation, inflow and
-    breach flow in kaf, north-arm mean elevation and the south-minus-north head."""
+def transform_covariates(
+    conn: duckdb.DuckDBPyConnection, discharge: dict, basins: list[str]
+) -> None:
+    """Monthly, complete months only. Snowpack at month end per basin and pooled: mean SWE
+    and precipitation, both as percent of the site medians (so the growing site roster does
+    not drift the index), and 8-inch soil moisture. Reservoir storage at month end summed
+    over the reporting stations per basin (the roster grows with dam construction, so early
+    sums are smaller for a physical reason). Inflow and breach flow in kaf, north-arm mean
+    elevation and the south-minus-north head."""
     inflow = discharge["inflow"]
     exchange = discharge.get("exchange", {})
     flow_cols = ",\n".join(
@@ -160,34 +296,47 @@ def transform_covariates(conn: duckdb.DuckDBPyConnection, discharge: dict) -> No
         ]
     )
     total = " + ".join(f"inflow_kaf_{river}" for river in inflow)
+    per_basin = {
+        "swe_eom": "swe",
+        "prec_wy_eom": "prec",
+        "swe_pct_median": "100 * swe_sum / swe_med",
+        "prec_pct_median": "100 * prec_sum / prec_med",
+        "sms_eom": "sms",
+    }
+    basin_cols = ",\n".join(
+        f"MAX(CASE WHEN basin = '{b}' THEN {expr} END) AS {name}_{b}"
+        for name, expr in per_basin.items()
+        for b in basins
+    )
+    res_cols = ",\n".join(
+        f"MAX(CASE WHEN basin = '{b}' THEN kaf END) AS res_kaf_{b}" for b in basins
+    )
     conn.execute(f"""
         CREATE OR REPLACE TABLE monthly_covariates AS
         WITH eom AS (
-            SELECT s.basin, d.station_triplet, DATE_TRUNC('month', d.d) AS month,
-                   arg_max(d.wteq_in, d.d) AS wteq_eom, arg_max(d.prec_in, d.d) AS prec_eom,
-                   MAX(d.d) AS last_d
+            SELECT s.basin, DATE_TRUNC('month', d.d) AS month, d.*
             FROM snotel_daily d JOIN snotel_sites s USING (station_triplet)
-            WHERE d.wteq_in IS NOT NULL
-            GROUP BY ALL
+            WHERE d.d = LAST_DAY(d.d) AND d.wteq_in IS NOT NULL
         ),
-        swe AS (
-            SELECT month, basin, AVG(wteq_eom) AS swe, AVG(prec_eom) AS prec, COUNT(*) AS n
-            FROM eom
-            WHERE last_d = LAST_DAY(month)
-            GROUP BY ALL
+        snow AS (
+            SELECT month, basin, COUNT(*) AS n,
+                   AVG(wteq_in) AS swe, AVG(prec_in) AS prec, AVG(sms_8_pct) AS sms,
+                   SUM(wteq_in) FILTER (wteq_median_in IS NOT NULL) AS swe_sum,
+                   SUM(wteq_median_in) AS swe_med,
+                   SUM(prec_in) FILTER (prec_median_in IS NOT NULL) AS prec_sum,
+                   SUM(prec_median_in) AS prec_med
+            FROM eom GROUP BY ALL
         ),
-        swe_wide AS (
+        snow_wide AS (
             SELECT month,
-                   MAX(CASE WHEN basin = 'bear' THEN swe END) AS swe_eom_bear,
-                   MAX(CASE WHEN basin = 'weber' THEN swe END) AS swe_eom_weber,
-                   MAX(CASE WHEN basin = 'provo_jordan' THEN swe END) AS swe_eom_provo_jordan,
-                   MAX(CASE WHEN basin = 'bear' THEN prec END) AS prec_wy_eom_bear,
-                   MAX(CASE WHEN basin = 'weber' THEN prec END) AS prec_wy_eom_weber,
-                   MAX(CASE WHEN basin = 'provo_jordan' THEN prec END) AS prec_wy_eom_provo_jordan,
+                   {basin_cols},
                    SUM(swe * n) / SUM(n) AS swe_eom_gsl,
                    SUM(prec * n) / SUM(n) AS prec_wy_eom_gsl,
+                   100 * SUM(swe_sum) / SUM(swe_med) AS swe_pct_median_gsl,
+                   100 * SUM(prec_sum) / SUM(prec_med) AS prec_pct_median_gsl,
+                   SUM(sms * n) / SUM(n) AS sms_eom_gsl,
                    SUM(n) AS n_snotel_sites
-            FROM swe GROUP BY month
+            FROM snow GROUP BY month
         ),
         flow AS (
             SELECT DATE_TRUNC('month', d) AS month, site_id,
@@ -200,15 +349,28 @@ def transform_covariates(conn: duckdb.DuckDBPyConnection, discharge: dict) -> No
                    {flow_cols}
             FROM flow WHERE n_days >= 25 GROUP BY month
         ),
+        res AS (
+            SELECT month, basin, SUM(storage_kaf) AS kaf, COUNT(*) AS n
+            FROM reservoir_monthly JOIN reservoir_sites USING (station_triplet)
+            GROUP BY ALL
+        ),
+        res_wide AS (
+            SELECT month,
+                   {res_cols},
+                   SUM(kaf) AS res_kaf_total, SUM(n) AS n_reservoirs
+            FROM res GROUP BY month
+        ),
         north AS (
             SELECT DATE_TRUNC('month', d) AS month, AVG(elevation) AS north_arm_ft
             FROM {NORTH_ARM_TABLE} GROUP BY month
         )
         SELECT month, s.* EXCLUDE (month), f.* EXCLUDE (month),
                {total} AS inflow_kaf_total,
+               r.* EXCLUDE (month),
                n.north_arm_ft, e.avg_elevation - n.north_arm_ft AS head_diff_ft
-        FROM swe_wide s
+        FROM snow_wide s
         FULL OUTER JOIN flow_wide f USING (month)
+        FULL OUTER JOIN res_wide r USING (month)
         FULL OUTER JOIN north n USING (month)
         LEFT JOIN monthly_elevation e USING (month)
         WHERE month < DATE_TRUNC('month', CURRENT_DATE)
@@ -219,9 +381,11 @@ def transform_covariates(conn: duckdb.DuckDBPyConnection, discharge: dict) -> No
 def run_covariates(conn: duckdb.DuckDBPyConnection, config: dict) -> None:
     cov = config["covariates"]
     ingest_snotel(conn, cov["snotel"])
+    ingest_reservoirs(conn, cov["reservoirs"], cov["snotel"]["basins"])
+    ingest_nrcs_forecasts(conn, cov["nrcs_forecasts"])
     ingest_usgs_discharge(conn, cov["usgs_discharge"])
     north = cov["north_arm"]
     ingest_elevation(conn, NORTH_ARM_TABLE, north["site"], ELEVATION_PARAMETER, north["start"])
-    transform_covariates(conn, cov["usgs_discharge"])
+    transform_covariates(conn, cov["usgs_discharge"], list(cov["snotel"]["basins"].values()))
     n = conn.execute("SELECT COUNT(*) FROM monthly_covariates").fetchone()[0]
     logging.info(f"monthly_covariates has {n} rows")

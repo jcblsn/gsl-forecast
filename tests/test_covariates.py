@@ -10,6 +10,8 @@ CFG = {
         "basins": {"1601": "bear", "160201": "weber", "160202": "provo_jordan"},
         "start": "2020-01-01",
     },
+    "reservoirs": {"states": ["UT"], "start": "2020-01-01"},
+    "nrcs_forecasts": {"station": "10010000:UT:USGS", "start": "2020-01-01"},
     "usgs_discharge": {
         "inflow": {"bear": "10126000"},
         "exchange": {"breach": "10010020"},
@@ -33,6 +35,47 @@ class FakeResponse:
 
 
 def fake_get(url, params=None, timeout=None):
+    if url.endswith("/forecasts"):
+        return FakeResponse(
+            [
+                {
+                    "stationTriplet": "10010000:UT:USGS",
+                    "data": [
+                        {
+                            "forecastPeriod": ["04-01", "07-31"],
+                            "publicationDate": "2020-02-01 00:00",
+                            "periodNormal": 450.0,
+                            "forecastValues": {"90": 10.0, "50": 300.0, "10": 900.0},
+                        }
+                    ],
+                }
+            ]
+        )
+    if url.endswith("/stations") and "BOR" in params["stationTriplets"]:
+        return FakeResponse(
+            [
+                {"stationTriplet": "9:UT:BOR", "name": "Res A", "huc": "160101010101"},
+                {"stationTriplet": "8:UT:BOR", "name": "Res B", "huc": "160101010102"},
+            ]
+        )
+    if url.endswith("/data") and params.get("duration") == "MONTHLY":
+        return FakeResponse(
+            [
+                {
+                    "stationTriplet": t,
+                    "data": [
+                        {
+                            "stationElement": {"elementCode": "RESC"},
+                            "values": [
+                                {"month": 1, "year": 2020, "value": 100000},
+                                {"month": 2, "year": 2020, "value": None},
+                            ],
+                        }
+                    ],
+                }
+                for t in params["stationTriplets"].split(",")
+            ]
+        )
     if url.endswith("/stations"):
         return FakeResponse(
             [
@@ -67,13 +110,17 @@ def fake_get(url, params=None, timeout=None):
                         {
                             "stationElement": {"elementCode": "WTEQ"},
                             "values": [
-                                {"date": "2020-01-30", "value": 5.0},
-                                {"date": "2020-01-31", "value": 6.0},
+                                {"date": "2020-01-30", "value": 5.0, "median": 10.0},
+                                {"date": "2020-01-31", "value": 6.0, "median": 12.0},
                             ],
                         },
                         {
                             "stationElement": {"elementCode": "PREC"},
                             "values": [{"date": "2020-01-31", "value": 10.0}],
+                        },
+                        {
+                            "stationElement": {"elementCode": "SMS", "heightDepth": -8},
+                            "values": [{"date": "2020-01-31", "value": 30.0}],
                         },
                     ],
                 }
@@ -107,10 +154,19 @@ def test_sites_filtered_by_basin(db):
 
 def test_snotel_rows_merge_elements(db):
     row = db.execute(
-        "SELECT wteq_in, prec_in FROM snotel_daily "
+        "SELECT wteq_in, prec_in, sms_8_pct, wteq_median_in, prec_median_in FROM snotel_daily "
         "WHERE station_triplet='1:UT:SNTL' AND d='2020-01-31'"
     ).fetchone()
-    assert row == (6.0, 10.0)
+    assert row == (6.0, 10.0, 30.0, 12.0, None)
+
+
+def test_snotel_old_schema_is_rebuilt(monkeypatch):
+    monkeypatch.setattr(usgs.requests, "get", fake_get)
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE snotel_daily (station_triplet VARCHAR, d DATE, wteq_in FLOAT)")
+        cov.ingest_snotel(conn, CFG["snotel"])
+        cols = {r[0] for r in conn.execute("DESCRIBE snotel_daily").fetchall()}
+        assert "wteq_median_in" in cols
 
 
 def test_discharge_skips_null_values(db):
@@ -126,6 +182,33 @@ def test_monthly_covariates_month_end_and_kaf(db):
     assert row[0] == 6.0 and row[1] == 6.0 and row[2] is None
     assert row[3] == pytest.approx(6.0) and row[4] == 2
     assert row[5] == pytest.approx(1000 * 31 * 86400 / 43560 / 1000)
+
+
+def test_reservoir_storage_summed_per_basin(db):
+    row = db.execute(
+        "SELECT res_kaf_bear, res_kaf_weber, res_kaf_total, n_reservoirs "
+        "FROM monthly_covariates WHERE month = DATE '2020-01-01'"
+    ).fetchone()
+    assert row == (pytest.approx(200.0), None, pytest.approx(200.0), 2)
+    assert db.execute("SELECT COUNT(*) FROM reservoir_monthly").fetchone()[0] == 2
+
+
+def test_nrcs_forecasts_one_row_per_exceedance(db):
+    rows = db.execute(
+        "SELECT publication_date, period_start, exceedance, kaf, normal_kaf "
+        "FROM nrcs_inflow_forecasts ORDER BY exceedance"
+    ).fetchall()
+    assert len(rows) == 3
+    assert rows[1][1:] == ("04-01", 50, 300.0, 450.0) and str(rows[1][0]) == "2020-02-01"
+
+
+def test_percent_of_median_and_soil_moisture(db):
+    row = db.execute(
+        "SELECT swe_pct_median_bear, swe_pct_median_gsl, prec_pct_median_gsl, sms_eom_gsl "
+        "FROM monthly_covariates WHERE month = DATE '2020-01-01'"
+    ).fetchone()
+    assert row[0] == pytest.approx(50.0) and row[1] == pytest.approx(50.0)
+    assert row[2] is None and row[3] == pytest.approx(30.0)
 
 
 def test_breach_and_north_arm_columns(db):
