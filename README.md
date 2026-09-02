@@ -152,8 +152,11 @@ Headline scalars by issue date (MAE, ft). Issue date means the outlook made from
 | Spring peak | May 1 | 0.13 | 0.12 | 0.18 | 0.29 |
 | Water-year end | Jan 1 | 0.91 | 1.09 | 1.28 | 1.23 |
 | Water-year end | Apr 1 | 0.43 | 0.73 | 0.94 | 1.58 |
+| Water-year end | Jun 1 | 0.32 | 0.53 | 0.56 | 1.78 |
+| Water-year end | Jul 1 | 0.29 | 0.37 | 0.55 | 1.61 |
+| Water-year end | Aug 1 | 0.19 | 0.19 | 0.30 | 1.05 |
 
-Snowpack resolves the winter case: from a January 1 issue the univariate model's peak error was no better than naive; with month-end SWE it roughly halves. Beyond 18 months the covariate models lose to the univariate ones, since snowpack known today says nothing about the next winter, so the 24-month product should blend toward `ets_damped_s12` at long leads (on the roadmap).
+Snowpack resolves the winter case: from a January 1 issue the univariate model's peak error was no better than naive; with month-end SWE it roughly halves. After the peak, the summer decline is also predictable: from a June 1 issue the September level is known to about a third of a foot, against 1.8 ft for persistence. `inflow_chain_area` (lake area in place of level in the bucket step) scores within 0.02 ft of `inflow_chain` at every lead, so the hypsometry does not yet add skill. Beyond 18 months the covariate models lose to the univariate ones, since snowpack known today says nothing about the next winter, so the 24-month product should blend toward `ets_damped_s12` at long leads (on the roadmap).
 
 ### Against the NRCS record
 
