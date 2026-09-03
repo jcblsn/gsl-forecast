@@ -13,7 +13,6 @@ from src.config import load_config
 from src.forecasting.base import Forecaster
 from src.forecasting.data import load_monthly_data
 from src.forecasting.multivariate.blend import (
-    UNIVARIATE_NAME,
     BlendForecaster,
     issue_season,
 )
@@ -225,16 +224,25 @@ def headline_calibration(model: Forecaster, horizon: int) -> dict:
             f"{model.n_weight_cutoffs} cutoffs; refusing to publish a headline"
         )
     return {
-        "algorithm_version": 2,
+        "algorithm_version": 3,
         "model": model.name,
-        "components": [model.snow_name, UNIVARIATE_NAME],
+        "components": list(model.component_names),
         "objective": "walk-forward MAE inside the training data",
-        "weight_step": 0.01,
-        "constraint": "nonincreasing by lead",
+        "weight_step": model.weight_step,
+        "constraint": "the share on every component except the last does not increase by lead",
         "issue_season": season,
         "n_weight_cutoffs": model.n_weight_cutoffs,
+        # One curve per component, keyed by season. `covariate_share` is 1 minus the weight
+        # on the last component, which is the part of the forecast the covariates carry.
         "weights": {
-            name: [round(float(v), 2) for v in curve[:horizon]]
+            name: {
+                component: [round(float(v), 2) for v in curve[:horizon, i]]
+                for i, component in enumerate(model.component_names)
+            }
+            for name, curve in model.weights.items()
+        },
+        "covariate_share": {
+            name: [round(float(1.0 - v), 2) for v in curve[:horizon, -1]]
             for name, curve in model.weights.items()
         },
     }
@@ -342,8 +350,11 @@ def explanation_payload(
                 "pred": float(row["pred"]),
                 "q05": _json_value(row.get("q05")),
                 "q95": _json_value(row.get("q95")),
-                "snow_weight": float(terms["snow_weight"].iloc[0])
-                if "snow_weight" in terms
+                "covariate_weight": float(terms["covariate_weight"].iloc[0])
+                if "covariate_weight" in terms
+                else None,
+                "snow_weight": float(terms["covariate_weight"].iloc[0])
+                if "covariate_weight" in terms
                 else None,
                 "contributions": [
                     {

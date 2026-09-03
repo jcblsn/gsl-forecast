@@ -8,11 +8,12 @@ from dateutil.relativedelta import relativedelta
 from src.forecasting.multivariate.blend import _CACHE as blend_cache
 from src.forecasting.multivariate.blend import (
     SEASON_MONTHS,
-    WEIGHT_GRID,
     BlendForecaster,
+    covariate_share,
     default_weights,
     issue_season,
     monotone_weight_path,
+    simplex_grid,
 )
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
 from src.forecasting.multivariate.regression import fallback_reason, gcv_alpha, ridge_fit
@@ -150,9 +151,10 @@ def test_blend_weights_fall_with_the_lead_in_every_fitted_season(synthetic):
     assert model.fitted_seasons
     for season in model.fitted_seasons:
         w = model.weights[season]
-        assert len(w) == 12
+        assert w.shape == (12, 2)
         assert ((w >= 0) & (w <= 1)).all()
-        assert (np.diff(w) <= 1e-9).all()
+        assert np.allclose(w.sum(axis=1), 1.0)
+        assert (np.diff(1.0 - w[:, -1]) <= 1e-9).all()
 
 
 def test_blend_lies_between_its_components(synthetic):
@@ -166,8 +168,8 @@ def test_blend_lies_between_its_components(synthetic):
 
 def test_blend_selects_the_curve_for_the_issue_season(synthetic):
     model = _blend().fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
-    model.weights["accumulation"] = np.zeros(12)
-    model.weights["melt"] = np.ones(12)
+    model.weights["accumulation"] = np.tile([0.0, 1.0], (12, 1))
+    model.weights["melt"] = np.tile([1.0, 0.0], (12, 1))
     snow, univariate = (f.predict(12)["pred"].to_numpy() for f in model._fitted)
     assert issue_season(pd.Timestamp("2015-03-01")) == "melt"
     assert np.allclose(model.predict(12)["pred"], snow)
@@ -176,24 +178,39 @@ def test_blend_selects_the_curve_for_the_issue_season(synthetic):
     assert np.allclose(december["pred"], univariate)
 
 
-def test_monotone_path_beats_a_per_lead_fit_on_the_stated_objective():
+@pytest.mark.parametrize("k, step", [(2, 0.01), (3, 0.05)])
+def test_monotone_path_beats_a_per_lead_fit_on_the_stated_objective(k, step):
     """The constrained search must minimise the loss it claims, not project a free fit."""
     rng = np.random.default_rng(7)
-    loss = rng.random((6, len(WEIGHT_GRID)))
-    path = monotone_weight_path(loss)
-    assert (np.diff(path) <= 1e-9).all()
-    index = {round(float(w), 2): i for i, w in enumerate(WEIGHT_GRID)}
-    chosen = sum(loss[lead, index[round(float(w), 2)]] for lead, w in enumerate(path))
-    free = np.sort(WEIGHT_GRID[loss.argmin(axis=1)])[::-1]
-    projected = sum(loss[lead, index[round(float(w), 2)]] for lead, w in enumerate(free))
+    grid = simplex_grid(k, step)
+    share = covariate_share(grid)
+    loss = rng.random((6, len(grid)))
+    path = monotone_weight_path(loss, share)
+    assert (np.diff(share[path]) <= 1e-9).all()
+    chosen = sum(loss[lead, j] for lead, j in enumerate(path))
+    free = sorted(loss.argmin(axis=1), key=lambda j: -share[j])
+    projected = sum(loss[lead, j] for lead, j in enumerate(free))
     assert chosen <= projected + 1e-9
 
 
-def test_default_weights_ramp_from_one_to_zero():
-    w = default_weights(24)
-    assert w[0] == 1.0 and w[5] == 1.0
-    assert w[-1] == 0.0
-    assert (np.diff(w) <= 1e-9).all()
+def test_simplex_grid_covers_the_simplex_in_share_order():
+    for k, step in ((2, 0.01), (3, 0.05)):
+        grid = simplex_grid(k, step)
+        assert np.allclose(grid.sum(axis=1), 1.0)
+        assert (grid >= 0).all()
+        assert (np.diff(covariate_share(grid)) >= -1e-12).all()
+        assert len(set(map(tuple, np.round(grid, 6)))) == len(grid)
+
+
+@pytest.mark.parametrize("k", [2, 3])
+def test_default_weights_ramp_from_one_to_zero(k):
+    w = default_weights(24, k)
+    share = 1.0 - w[:, -1]
+    assert share[0] == 1.0 and share[5] == 1.0
+    assert share[-1] == 0.0
+    assert (np.diff(share) <= 1e-9).all()
+    assert np.allclose(w.sum(axis=1), 1.0)
+    assert np.allclose(w[:, :-1], (share / (k - 1))[:, None])
 
 
 def test_snowpack_contributions_sum_to_the_prediction(synthetic):
@@ -217,5 +234,5 @@ def test_blends_with_different_components_do_not_share_the_cache(synthetic):
     blend_cache.clear()
     _blend().fit(train)
     _blend(snow_features=["swe_eom_gsl", "prec_wy_eom_gsl"], snow_name="swe_regression").fit(train)
-    labels = {key[0] for key in blend_cache}
+    labels = {key[0].split("|")[0] for key in blend_cache}
     assert labels == {"swe_head", "swe_regression", "ets_damped_s12"}

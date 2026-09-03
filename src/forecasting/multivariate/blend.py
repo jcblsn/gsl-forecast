@@ -1,18 +1,23 @@
-"""The official model. It mixes 2 component models with a fitted weight.
+"""The official model. It mixes component models with fitted weights.
 
 Snowpack controls the lake level for the next 6 to 12 months. It gives no information about
 the winter after next. Therefore the best model changes with the forecast lead.
 
-This model applies the weight w to the snowpack model, and 1 - w to `ets_damped_s12`. It
-fits w for each lead and for each issue season.
+The model puts a weight on each component. The weights sum to 1 at every lead. The last
+component is the anchor, `ets_damped_s12`, which uses the lake record alone. The weight on
+everything except the anchor is the covariate share, and that share must not increase with
+the lead. Inside the share the mix is free, so a component that is strong at short leads and
+a component that is strong at long leads can trade places as the lead grows.
+
+The model fits the weights for each lead and for each issue season.
 
 The issue season is necessary. A lead of 6 months from a February issue gives the spring
 peak, which the current snowpack controls. The same lead from an August issue gives a month
 in the next accumulation season, which the current snowpack does not control.
 
-The model fits the weight curves with a walk-forward pass in the training data. Each curve
-must decrease with the lead. The search finds the curve with the lowest total absolute error
-under that condition. It does not fit each lead separately and then correct the result.
+The model fits the weight curves with a walk-forward pass in the training data. The search
+finds the curve with the lowest total absolute error under the condition above. It does not
+fit each lead separately and then correct the result.
 
 The inner pass uses the same 15-year window as the harness. A longer window gives less noise
 in the weights, but it gives a biased result. Before approximately 1995 the SNOTEL record is
@@ -21,6 +26,7 @@ now, and gives the snowpack model approximately half of the correct weight.
 """
 
 from datetime import date
+from itertools import product
 from typing import Self
 
 import numpy as np
@@ -36,7 +42,8 @@ from .swe_regression import SweRegressionForecaster
 SNOW_FEATURES = ["swe_eom_gsl", "prec_wy_eom_gsl", "head_diff_ft"]
 SNOW_NAME = "swe_head"
 UNIVARIATE_NAME = "ets_damped_s12"
-WEIGHT_GRID = np.round(np.arange(0.0, 1.0001, 0.01), 2)
+PAIR_STEP = 0.01
+SIMPLEX_STEP = 0.05
 FULL_WEIGHT_LEAD = 6
 ZERO_WEIGHT_LEAD = 24
 
@@ -56,35 +63,77 @@ def issue_season(cutoff: pd.Timestamp) -> str:
     return next(name for name, months in SEASON_MONTHS.items() if issue_month in months)
 
 
-def default_weights(horizon: int) -> np.ndarray:
-    """The fixed ramp. The model uses it when the training data gives too few cutoffs."""
+def simplex_grid(k: int, step: float) -> np.ndarray:
+    """Every weight vector of length k on the simplex, in steps of `step`.
+
+    The rows are sorted by the covariate share, which is 1 minus the last weight. The
+    dynamic program needs that order, because its condition is on the share.
+    """
+    n = int(round(1.0 / step))
+    rows = [
+        np.array([*counts, n - sum(counts)], dtype=float) / n
+        for counts in product(range(n + 1), repeat=k - 1)
+        if sum(counts) <= n
+    ]
+    grid = np.array(rows)
+    return grid[np.argsort(1.0 - grid[:, -1], kind="stable")]
+
+
+def covariate_share(grid: np.ndarray) -> np.ndarray:
+    return 1.0 - grid[:, -1]
+
+
+def default_weights(horizon: int, k: int = 2) -> np.ndarray:
+    """The fixed ramp. The model uses it when the training data gives too few cutoffs.
+
+    The share falls from 1 at lead 6 to 0 at lead 24, and the covariate components hold
+    equal parts of it.
+    """
     leads = np.arange(1, horizon + 1)
     span = ZERO_WEIGHT_LEAD - FULL_WEIGHT_LEAD
-    return np.clip((ZERO_WEIGHT_LEAD - leads) / span, 0.0, 1.0)
+    share = np.clip((ZERO_WEIGHT_LEAD - leads) / span, 0.0, 1.0)
+    weights = np.zeros((horizon, k))
+    weights[:, :-1] = (share / (k - 1))[:, None]
+    weights[:, -1] = 1.0 - share
+    return weights
 
 
-def monotone_weight_path(loss: np.ndarray) -> np.ndarray:
-    """The weight path with the lowest total loss that does not increase with the lead.
+def monotone_weight_path(loss: np.ndarray, share: np.ndarray) -> np.ndarray:
+    """The grid point at each lead with the lowest total loss, under the share condition.
 
-    `loss[i, j]` is the total absolute error at lead i + 1 for the weight `WEIGHT_GRID[j]`. A
-    dynamic program finds the minimum over all leads under the condition. The condition is
-    thus part of the objective, and not a correction to a free fit. For equal loss, the
-    program selects the smaller weight on the snowpack model.
+    `loss[i, j]` is the total absolute error at lead i + 1 for grid point j, and `share[j]`
+    is the covariate share of that point. `share` must not increase with the lead. A dynamic
+    program finds the minimum over all leads under the condition, so the condition is part
+    of the objective and not a correction to a free fit.
+
+    Grid points with an equal share form one group. The program takes the best point of
+    every group at or above the current share. For an equal loss it selects the lower share,
+    and inside a group the earlier point.
     """
-    n_leads, n_weights = loss.shape
-    cost = np.full((n_leads, n_weights), np.inf)
-    previous = np.zeros((n_leads, n_weights), dtype=int)
+    n_leads, n_grid = loss.shape
+    bounds = np.flatnonzero(np.diff(share) > 0) + 1
+    groups = list(zip([0, *bounds], [*bounds, n_grid], strict=True))
+
+    cost = np.full((n_leads, n_grid), np.inf)
+    previous = np.zeros((n_leads, n_grid), dtype=int)
     cost[0] = loss[0]
     for i in range(1, n_leads):
-        for current in range(n_weights):
-            prior = current + int(np.argmin(cost[i - 1, current:]))
-            cost[i, current] = loss[i, current] + cost[i - 1, prior]
-            previous[i, current] = prior
+        best_value, best_index = np.inf, 0
+        carried_value = np.empty(n_grid)
+        carried_index = np.empty(n_grid, dtype=int)
+        for start, end in reversed(groups):
+            inside = start + int(np.argmin(cost[i - 1, start:end]))
+            if cost[i - 1, inside] <= best_value:
+                best_value, best_index = cost[i - 1, inside], inside
+            carried_value[start:end] = best_value
+            carried_index[start:end] = best_index
+        cost[i] = loss[i] + carried_value
+        previous[i] = carried_index
     selected = np.zeros(n_leads, dtype=int)
     selected[-1] = int(np.argmin(cost[-1]))
     for i in range(n_leads - 1, 0, -1):
         selected[i - 1] = previous[i, selected[i]]
-    return WEIGHT_GRID[selected]
+    return selected
 
 
 def _fingerprint(train: pd.DataFrame) -> tuple:
@@ -99,8 +148,8 @@ def _cached_prediction(label: str, factory, train: pd.DataFrame, horizon: int) -
     share almost all of their inner cutoffs. A prediction at an inner cutoff uses only the
     rows on or before that cutoff. Therefore the cached value is always correct.
 
-    The label identifies the component. Two blends with different snowpack components must
-    not share a cache entry.
+    The label identifies the component, and it carries the component's settings, so 2
+    components with the same name and different features cannot share an entry.
     """
     key = (label, train[TIME_COL].iloc[-1], horizon, _fingerprint(train))
     hit = _CACHE.get(key)
@@ -112,15 +161,23 @@ def _cached_prediction(label: str, factory, train: pd.DataFrame, horizon: int) -
     return hit
 
 
+def _settings_label(name: str, factory) -> str:
+    """A label that separates 2 components with the same name and different settings."""
+    settings = sorted(f"{k}={v}" for k, v in factory().get_metrics().items())
+    return f"{name}|{'|'.join(settings)}"
+
+
 class BlendForecaster(Forecaster):
     def __init__(
         self,
         snow_features: list[str] | None = None,
         snow_name: str = SNOW_NAME,
+        components: list[tuple[str, object]] | None = None,
         horizon: int = 24,
         history_years: int = 15,
         max_cutoffs: int | None = None,
         min_rows: int = 20,
+        weight_step: float | None = None,
         name: str = "blend",
     ):
         super().__init__(name=name)
@@ -130,14 +187,24 @@ class BlendForecaster(Forecaster):
         self.history_years = history_years
         self.max_cutoffs = max_cutoffs
         self.min_rows = min_rows
-        self.weights = {season: default_weights(horizon) for season in SEASON_MONTHS}
+        self._factories = components or self.component_factories()
+        self.component_names = [label for label, _ in self._factories]
+        self.k = len(self._factories)
+        self.weight_step = weight_step or (PAIR_STEP if self.k == 2 else SIMPLEX_STEP)
+        self._grid = simplex_grid(self.k, self.weight_step)
+        self._share = covariate_share(self._grid)
+        self.weights = {season: default_weights(horizon, self.k) for season in SEASON_MONTHS}
         self.fitted_seasons: list[str] = []
         self.n_weight_cutoffs = 0
         self._fitted: list[Forecaster] = []
-        self._factories = self.component_factories()
+        self._labels = [_settings_label(label, f) for label, f in self._factories]
 
     def component_factories(self) -> list[tuple[str, object]]:
-        """The 2 models that this model mixes. The registry also holds each one separately."""
+        """The 2 models that this model mixes. The registry also holds each one separately.
+
+        The last entry is the anchor. It uses the lake record alone, and it holds the weight
+        that the covariate components give up as the lead grows.
+        """
         return [
             (
                 self.snow_name,
@@ -165,14 +232,13 @@ class BlendForecaster(Forecaster):
         if self.max_cutoffs is not None:
             cutoffs = cutoffs[-self.max_cutoffs :]
         observed = data.set_index(TIME_COL)[TARGET_COL]
-        factories = self._factories
         actuals, predictions, seasons = [], [], []
         for cutoff in cutoffs:
             train = data[data[TIME_COL] <= cutoff]
             months = [cutoff + relativedelta(months=i) for i in range(1, self.horizon + 1)]
             rows = [
                 _cached_prediction(label, factory, train, self.horizon)
-                for label, factory in factories
+                for label, (_, factory) in zip(self._labels, self._factories, strict=True)
             ]
             actuals.append(observed.reindex(months).to_numpy(dtype=float))
             predictions.append(np.stack(rows))
@@ -184,32 +250,27 @@ class BlendForecaster(Forecaster):
 
     def _fit_weights(self, data: pd.DataFrame) -> dict[str, np.ndarray]:
         result = self._walk_forward(data)
-        weights = {season: default_weights(self.horizon) for season in SEASON_MONTHS}
+        weights = {season: default_weights(self.horizon, self.k) for season in SEASON_MONTHS}
         self.fitted_seasons = []
         if result is None:
             return weights
         actual, pred, seasons = result
-        snow, univariate = pred[:, 0, :], pred[:, 1, :]
         for season in SEASON_MONTHS:
             in_season = seasons == season
-            loss = np.zeros((self.horizon, len(WEIGHT_GRID)))
+            loss = np.zeros((self.horizon, len(self._grid)))
             enough = True
             for lead in range(self.horizon):
-                usable = (
-                    in_season
-                    & np.isfinite(actual[:, lead])
-                    & np.isfinite(snow[:, lead])
-                    & np.isfinite(univariate[:, lead])
-                )
+                usable = in_season & np.isfinite(actual[:, lead])
+                for component in range(self.k):
+                    usable = usable & np.isfinite(pred[:, component, lead])
                 if usable.sum() < self.min_rows:
                     enough = False
                     break
                 a = actual[usable, lead][:, None]
-                s = snow[usable, lead][:, None]
-                u = univariate[usable, lead][:, None]
-                loss[lead] = np.abs(a - (u + WEIGHT_GRID[None, :] * (s - u))).sum(axis=0)
+                mixed = pred[usable, :, lead] @ self._grid.T
+                loss[lead] = np.abs(a - mixed).sum(axis=0)
             if enough:
-                weights[season] = monotone_weight_path(loss)
+                weights[season] = self._grid[monotone_weight_path(loss, self._share)]
                 self.fitted_seasons.append(season)
         return weights
 
@@ -222,24 +283,26 @@ class BlendForecaster(Forecaster):
         return self
 
     def weights_for(self, h: int, season: str | None = None) -> np.ndarray:
-        """The weight curve for one issue season, set to a length of `h` leads."""
+        """The weights for one issue season, set to a length of `h` leads."""
         curve = self.weights[season or issue_season(self.last_date)]
         if h <= len(curve):
             return curve[:h]
-        return np.concatenate([curve, np.full(h - len(curve), curve[-1])])
+        pad = np.repeat(curve[-1][None, :], h - len(curve), axis=0)
+        return np.concatenate([curve, pad])
 
     def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
         origin = start_date or self.last_date
-        snow, univariate = (f.predict(h, start_date) for f in self._fitted)
+        parts = np.stack(
+            [f.predict(h, start_date)["pred"].to_numpy(dtype=float) for f in self._fitted]
+        )
         w = self.weights_for(h, issue_season(origin))
         return pd.DataFrame(
             {
                 TIME_COL: [origin + relativedelta(months=i) for i in range(1, h + 1)],
                 "target": TARGET_COL,
-                "pred": w * snow["pred"].to_numpy(dtype=float)
-                + (1 - w) * univariate["pred"].to_numpy(dtype=float),
+                "pred": (w.T * parts).sum(axis=0),
                 "model_name": self.name,
             }
         )
@@ -247,32 +310,51 @@ class BlendForecaster(Forecaster):
     def contributions(self, h: int) -> pd.DataFrame:
         """The terms that add to the blended point forecast.
 
-        The model multiplies each snowpack term by the weight for its lead. The univariate
-        part has no terms for the inputs, so it goes into the reference path. The reference
-        path is thus the part of the forecast that no named input changes.
+        The model multiplies the terms of each covariate component by that component's
+        weight, and adds the terms that name the same input. The anchor has no terms for the
+        inputs, so its share goes into the reference path. The reference path is thus the
+        part of the forecast that no named input changes.
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before explanation")
-        snow, univariate = self._fitted
         leads = range(1, h + 1)
-        weight = pd.Series(self.weights_for(h), index=leads)
-        share = pd.Series(univariate.predict(h)["pred"].to_numpy(dtype=float), index=leads)
-        out = snow.contributions(h)
-        out["snow_weight"] = out["h"].map(weight)
-        out["contribution_ft"] = out["contribution_ft"] * out["snow_weight"]
+        weights = self.weights_for(h)
+        frames = []
+        for i in range(self.k - 1):
+            part = self._fitted[i].contributions(h)
+            scale = pd.Series(weights[:, i], index=leads)
+            part["contribution_ft"] = part["contribution_ft"] * part["h"].map(scale)
+            frames.append(part)
+        out = (
+            pd.concat(frames, ignore_index=True)
+            .groupby(["month", "h", "input"], as_index=False)
+            .agg(
+                value=("value", "first"),
+                reference=("reference", "first"),
+                contribution_ft=("contribution_ft", "sum"),
+            )
+        )
+        anchor = pd.Series(self._fitted[-1].predict(h)["pred"].to_numpy(dtype=float), index=leads)
+        anchor_weight = pd.Series(weights[:, -1], index=leads)
         reference = out["input"] == "reference_path"
-        out.loc[reference, "contribution_ft"] += (
-            1.0 - out.loc[reference, "snow_weight"]
-        ) * out.loc[reference, "h"].map(share)
+        out.loc[reference, "contribution_ft"] += out.loc[reference, "h"].map(anchor_weight * anchor)
+        out["covariate_weight"] = out["h"].map(pd.Series(1.0 - weights[:, -1], index=leads))
+        out["snow_weight"] = out["covariate_weight"]
         return out
 
     def get_metrics(self) -> dict[str, object]:
         season = issue_season(self.last_date) if self.is_fitted else None
-        curve = self.weights[season] if season else default_weights(self.horizon)
+        curve = self.weights[season] if season else default_weights(self.horizon, self.k)
+        share = 1.0 - curve[:, -1]
         return {
-            "components": f"{self.snow_name},{UNIVARIATE_NAME}",
+            "components": ",".join(self.component_names),
+            "weight_step": self.weight_step,
             "n_weight_cutoffs": self.n_weight_cutoffs,
             "fitted_seasons": ",".join(self.fitted_seasons) or "none",
             "issue_season": season or "unfitted",
-            **{f"weight_h{h}": float(curve[h - 1]) for h in (1, 6, 12, 24) if h <= len(curve)},
+            **{
+                f"covariate_weight_h{h}": round(float(share[h - 1]), 3)
+                for h in (1, 6, 12, 24)
+                if h <= len(curve)
+            },
         }

@@ -29,11 +29,13 @@ COLORS = {
     "inflow_chain": "#1baf7a",
 }
 
-# A variant takes the colour of the model it varies, and a dashed line. The pair is then 1
-# hue with 2 line styles, which needs no further colour separation.
+# A variant takes the colour of the model it varies, and its own line type. A family is then
+# 1 hue with 1 line type for each member, which needs no further colour separation. This is
+# how `state_space` sits next to `inflow_chain`: the same water balance in another form.
 VARIANT_OF = {
-    "blend_swe": "blend",
-    "inflow_chain_area": "inflow_chain",
+    "blend_swe": ("blend", "dashed"),
+    "inflow_chain_area": ("inflow_chain", "dashed"),
+    "state_space": ("inflow_chain", "dotted"),
 }
 
 
@@ -46,8 +48,8 @@ def model_style(models: list[str]) -> tuple[dict, dict]:
             f"so add one to COLORS in {__name__}, or select from: "
             f"{', '.join(sorted(set(COLORS) | set(VARIANT_OF)))}"
         )
-    colors = {m: COLORS[VARIANT_OF.get(m, m)] for m in models}
-    linetypes = {m: ("dashed" if m in VARIANT_OF else "solid") for m in models}
+    colors = {m: COLORS[VARIANT_OF.get(m, (m,))[0]] for m in models}
+    linetypes = {m: VARIANT_OF.get(m, (m, "solid"))[1] for m in models}
     return colors, linetypes
 
 
@@ -70,6 +72,11 @@ def hindcast_frame(
         preds["h"] = range(1, horizon + 1)
         if eq is not None and f.name in set(eq["model"]):
             preds = apply_intervals(preds, eq, f.name)
+        elif eq is not None:
+            logging.warning(
+                f"{f.name} has no interval: the cross-validation file does not hold it. "
+                "Re-run gsl-cv with this model to get one."
+            )
         frames.append(preds)
     out = pd.concat(frames, ignore_index=True)
     out["month"] = pd.to_datetime(out["month"])
@@ -95,7 +102,10 @@ def score(fc: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
         s = g[spring.loc[g.index]]
         if not s.empty:
             row["peak_pred"], row["peak_obs"] = s["pred"].max(), s["actual"].max()
-        if "q05" in g.columns:
+        # After the concat every row holds a q05 column, and it is NULL for a model that the
+        # cross-validation file does not cover. A comparison against NULL is false, so an
+        # absent interval used to read as 0.00 coverage rather than as no interval.
+        if "q05" in g.columns and g["q05"].notna().all():
             row["cov90"] = ((g["actual"] >= g["q05"]) & (g["actual"] <= g["q95"])).mean()
         rows.append(row)
     return pd.DataFrame(rows).round(2)

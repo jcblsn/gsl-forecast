@@ -131,7 +131,7 @@ reference = (selected?.contributions ?? []).find(d => d.input === "reference_pat
 //| echo: false
 driverSummary = selected ? html`<div class="target-summary">
   <span><strong>${formatFeet(selected.pred)}</strong> forecast</span>
-  <span><strong>${Math.round((selected.snow_weight ?? 0) * 100)}%</strong> from the snowpack model</span>
+  <span><strong>${Math.round((selected.covariate_weight ?? selected.snow_weight ?? 0) * 100)}%</strong> from the covariate models</span>
   <span><strong>${formatFeet(reference?.contribution_ft)}</strong> reference path</span>
 </div>` : html``
 ```

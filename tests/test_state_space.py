@@ -97,6 +97,36 @@ def test_feature_columns_matches_stage_one(fitted):
     assert fitted.feature_columns() == ["inflow_kaf_total", "swe_eom_gsl", "prec_wy_eom_gsl"]
 
 
+def test_a_monthly_term_lands_on_its_own_month():
+    """statsmodels writes alpha_(t+1) = c_t + T alpha_t, so the intercept at t drives t + 1.
+
+    Without a shift the fit puts each monthly term 1 month early, and the forecast then
+    peaks and troughs 1 month before the record does. This builds a series whose only steps
+    are a rise into May and a fall into September, and requires both to land on their month.
+    """
+    import warnings
+
+    from src.forecasting.multivariate.state_space import WaterBalanceSSM
+
+    rng = np.random.default_rng(0)
+    step = np.zeros(12)
+    step[4], step[8] = 2.0, -1.0
+    level, months, values = 100.0, [], []
+    for d in pd.date_range("1980-01-01", periods=40 * 12, freq="MS"):
+        level = 0.995 * (level - 100.0) + 100.0 + step[d.month - 1] + rng.normal(0, 0.01)
+        months.append(d.month)
+        values.append(level)
+    values = np.array(values)
+
+    model = WaterBalanceSSM(values - values.mean(), np.zeros(len(values)), np.array(months))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = model.fit(disp=False, maxiter=300)
+    monthly = model.parts(np.asarray(result.params))["monthly"]
+    assert int(np.argmax(monthly)) == 4
+    assert int(np.argmin(monthly)) == 8
+
+
 def test_predict_before_fit_raises():
     with pytest.raises(RuntimeError, match="fitted"):
         StateSpaceForecaster().predict(6)

@@ -56,6 +56,18 @@ def _sigmoid(x: float) -> float:
     return float(1.0 / (1.0 + np.exp(-np.clip(x, -30.0, 30.0))))
 
 
+def _shift_back(values: np.ndarray) -> np.ndarray:
+    """Element t holds what was element t + 1. The last element repeats the one before it.
+
+    The last element drives a state after the end of the sample, which nothing observes, so
+    its value does not change any result.
+    """
+    out = np.empty_like(values)
+    out[:-1] = values[1:]
+    out[-1] = values[-1]
+    return out
+
+
 class WaterBalanceSSM(sm.tsa.statespace.MLEModel):
     """The state-space form. `exog` is the monthly inflow, already free of missing values."""
 
@@ -65,8 +77,13 @@ class WaterBalanceSSM(sm.tsa.statespace.MLEModel):
         # 0.1 and phi_raw is near 6. The optimizer fails a line search on that spread, so the
         # column enters in units of its own standard deviation.
         self.inflow_scale = float(np.std(inflow)) or 1.0
-        self.inflow = np.asarray(inflow, dtype=float) / self.inflow_scale
-        self.month_index = np.asarray(months, dtype=int) - 1
+        # statsmodels writes the transition as alpha_(t+1) = c_t + T alpha_t, so the state
+        # intercept at t drives the level at t + 1. The driver of the level in month t is
+        # therefore month t's own term and month t's own inflow, held at index t - 1. Both
+        # arrays move back 1 step. Without the shift the fit puts each monthly term 1 month
+        # early, and the forecast peaks and troughs 1 month before the record does.
+        self.inflow = _shift_back(np.asarray(inflow, dtype=float)) / self.inflow_scale
+        self.month_index = _shift_back(np.asarray(months, dtype=int)) - 1
         self["design", 0, 0] = 1.0
         self["selection", 0, 0] = 1.0
         self.ssm["state_intercept"] = np.zeros((1, self.nobs))

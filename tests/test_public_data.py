@@ -40,7 +40,7 @@ def predictions_with_contributions():
                 "value": None,
                 "reference": None,
                 "contribution_ft": 4190.0,
-                "snow_weight": 0.5,
+                "covariate_weight": 0.5,
             },
             {
                 "month": pd.Timestamp("2026-09-01"),
@@ -49,7 +49,7 @@ def predictions_with_contributions():
                 "value": 2.0,
                 "reference": 1.0,
                 "contribution_ft": 0.25,
-                "snow_weight": 0.5,
+                "covariate_weight": 0.5,
             },
         ]
     )
@@ -99,7 +99,7 @@ def _fitted_blend(season, fitted_seasons):
     }[season]
     model.fitted_seasons = list(fitted_seasons)
     model.n_weight_cutoffs = 120 if fitted_seasons else 0
-    model.weights = {name: default_weights(6) for name in model.weights}
+    model.weights = {name: default_weights(6, model.k) for name in model.weights}
     return model
 
 
@@ -107,14 +107,16 @@ def test_calibration_records_the_weights_that_were_fitted():
     model = _fitted_blend("melt", ["accumulation", "melt", "recession"])
     calibration = headline_calibration(model, 6)
     assert calibration["issue_season"] == "melt"
-    assert calibration["constraint"] == "nonincreasing by lead"
-    assert len(calibration["weights"]["melt"]) == 6
+    assert calibration["constraint"].startswith("the share on every component")
+    assert set(calibration["weights"]["melt"]) == {"swe_head", "ets_damped_s12"}
+    assert len(calibration["weights"]["melt"]["swe_head"]) == 6
+    assert len(calibration["covariate_share"]["melt"]) == 6
 
 
 def test_calibration_refuses_a_curve_that_was_never_fitted():
     """A blend that found no cutoffs holds the fixed ramp, which must not reach an issue."""
     model = _fitted_blend("melt", [])
-    assert np.allclose(model.weights["melt"], default_weights(6))
+    assert np.allclose(model.weights["melt"], default_weights(6, model.k))
     with pytest.raises(ValueError, match="refusing to publish a headline"):
         headline_calibration(model, 6)
 
