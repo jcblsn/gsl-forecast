@@ -310,19 +310,24 @@ class BlendForecaster(Forecaster):
     def contributions(self, h: int) -> pd.DataFrame:
         """The terms that add to the blended point forecast.
 
-        The model multiplies the terms of each covariate component by that component's
-        weight, and adds the terms that name the same input. The anchor has no terms for the
-        inputs, so its share goes into the reference path. The reference path is thus the
-        part of the forecast that no named input changes.
+        The model multiplies the terms of each component by that component's weight, and it
+        adds the terms that name the same input. A component with no `contributions` method
+        gives no term for an input, so its whole weighted forecast joins the reference path.
+        The anchor is always such a component. The reference path is thus the part of the
+        forecast that no named input changes, and the terms still add to the prediction.
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before explanation")
         leads = range(1, h + 1)
         weights = self.weights_for(h)
-        frames = []
-        for i in range(self.k - 1):
-            part = self._fitted[i].contributions(h)
+        frames, unexplained = [], pd.Series(0.0, index=leads)
+        for i, model in enumerate(self._fitted):
             scale = pd.Series(weights[:, i], index=leads)
+            if not hasattr(model, "contributions"):
+                path = pd.Series(model.predict(h)["pred"].to_numpy(dtype=float), index=leads)
+                unexplained = unexplained + scale * path
+                continue
+            part = model.contributions(h)
             part["contribution_ft"] = part["contribution_ft"] * part["h"].map(scale)
             frames.append(part)
         out = (
@@ -334,11 +339,12 @@ class BlendForecaster(Forecaster):
                 contribution_ft=("contribution_ft", "sum"),
             )
         )
-        anchor = pd.Series(self._fitted[-1].predict(h)["pred"].to_numpy(dtype=float), index=leads)
-        anchor_weight = pd.Series(weights[:, -1], index=leads)
         reference = out["input"] == "reference_path"
-        out.loc[reference, "contribution_ft"] += out.loc[reference, "h"].map(anchor_weight * anchor)
-        out["covariate_weight"] = out["h"].map(pd.Series(1.0 - weights[:, -1], index=leads))
+        out.loc[reference, "contribution_ft"] += out.loc[reference, "h"].map(unexplained)
+        explained = sum(
+            weights[:, i] for i, m in enumerate(self._fitted) if hasattr(m, "contributions")
+        )
+        out["covariate_weight"] = out["h"].map(pd.Series(explained, index=leads))
         out["snow_weight"] = out["covariate_weight"]
         return out
 

@@ -11,6 +11,46 @@ from src.forecasting.univariate.theta import ThetaForecaster
 
 BASELINE = "naive_last"
 
+SWE_HEAD_FEATURES = ["swe_eom_gsl", "prec_wy_eom_gsl", "head_diff_ft"]
+
+
+def _anchor() -> tuple[str, object]:
+    """The last component of every blend: the best model that uses the lake record alone."""
+    return (
+        "ets_damped_s12",
+        lambda: HoltWintersForecaster(
+            trend="add", seasonal="add", seasonal_periods=12, damped_trend=True
+        ),
+    )
+
+
+def _swe_head() -> tuple[str, object]:
+    return (
+        "swe_head",
+        lambda: SweRegressionForecaster(features=SWE_HEAD_FEATURES, name="swe_head"),
+    )
+
+
+def three_component_blends() -> list[Forecaster]:
+    """One blend for each candidate second covariate component.
+
+    `blend` is strong to lead 12 and weak past lead 18, because `swe_head` is. Each model
+    below adds a component that is strong where `swe_head` is weak, and the fitted weight
+    decides where to use it.
+    """
+    second = {
+        "blend3_swe": (
+            "swe_regression",
+            lambda: SweRegressionForecaster(name="swe_regression"),
+        ),
+        "blend3_chain": ("inflow_chain", InflowChainForecaster),
+        "blend3_state": ("state_space", StateSpaceForecaster),
+    }
+    return [
+        BlendForecaster(components=[_swe_head(), pair, _anchor()], name=name)
+        for name, pair in second.items()
+    ]
+
 
 def all_forecasters() -> list[Forecaster]:
     """Every model benchmarked in cross-validation. Fresh instances on each call."""
@@ -41,6 +81,7 @@ def all_forecasters() -> list[Forecaster]:
             snow_name="swe_regression",
             name="blend_swe",
         ),
+        *three_component_blends(),
     ]
 
 

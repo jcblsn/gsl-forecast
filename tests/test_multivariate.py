@@ -18,6 +18,7 @@ from src.forecasting.multivariate.blend import (
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
 from src.forecasting.multivariate.regression import fallback_reason, gcv_alpha, ridge_fit
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
+from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
 
 
 @pytest.fixture
@@ -223,6 +224,52 @@ def test_snowpack_contributions_sum_to_the_prediction(synthetic):
 
 def test_blend_contributions_sum_to_the_blended_prediction(synthetic):
     model = _blend().fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
+    predictions = model.predict(12).set_index("month")["pred"]
+    explained = model.contributions(12).groupby("month")["contribution_ft"].sum()
+    assert np.allclose(predictions, explained)
+
+
+def _blend3(synthetic):
+    from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
+
+    return BlendForecaster(
+        components=[
+            ("swe_head", lambda: SweRegressionForecaster(name="swe_head")),
+            ("inflow_chain", InflowChainForecaster),
+            (
+                "ets_damped_s12",
+                lambda: HoltWintersForecaster(
+                    trend="add", seasonal="add", seasonal_periods=12, damped_trend=True
+                ),
+            ),
+        ],
+        horizon=12,
+        history_years=8,
+        max_cutoffs=40,
+        min_rows=4,
+        name="blend3",
+    )
+
+
+def test_three_component_blend_mixes_on_the_simplex(synthetic):
+    model = _blend3(synthetic).fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
+    assert model.k == 3
+    for season in model.fitted_seasons:
+        w = model.weights[season]
+        assert w.shape == (12, 3)
+        assert np.allclose(w.sum(axis=1), 1.0)
+        assert (np.diff(1.0 - w[:, -1]) <= 1e-9).all()
+
+
+def test_three_component_prediction_is_the_weighted_sum(synthetic):
+    model = _blend3(synthetic).fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
+    parts = np.stack([f.predict(12)["pred"].to_numpy(dtype=float) for f in model._fitted])
+    w = model.weights_for(12)
+    assert np.allclose(model.predict(12)["pred"].to_numpy(), (w.T * parts).sum(axis=0))
+
+
+def test_three_component_contributions_sum_to_the_prediction(synthetic):
+    model = _blend3(synthetic).fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
     predictions = model.predict(12).set_index("month")["pred"]
     explained = model.contributions(12).groupby("month")["contribution_ft"].sum()
     assert np.allclose(predictions, explained)
