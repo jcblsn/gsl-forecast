@@ -7,6 +7,7 @@ DEFAULTS = {
         "horizon": 12,
         "experiment_db": "forecast_experiments.db",
         "output_dir": "./outputs",
+        "headline_model": None,
         "cv": {"history_years": 15, "cutoffs": "all"},
     }
 }

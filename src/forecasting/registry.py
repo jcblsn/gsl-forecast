@@ -44,6 +44,7 @@ PRODUCTION_MODELS = {
     "ets_damped_noseas",
     "theta",
     "swe_regression",
+    "swe_head",
     "inflow_chain",
 }
 

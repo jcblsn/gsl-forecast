@@ -1,0 +1,16 @@
+---
+title: Statistical method
+description: The current headline model and its date-level input contributions.
+---
+
+{{< include ../docs/headline-model.md >}}
+
+## Public record
+
+Each issue stores its forecast, empirical interval, learned weight curves, calibration
+cutoffs, data vintage, and input contributions. The repository retains the dated files for
+later verification against the gauge.
+
+- [Dated forecasts](https://github.com/jcblsn/gsl-forecast/tree/main/forecasts)
+- [Model source](https://github.com/jcblsn/gsl-forecast/tree/main/src/forecasting)
+- [USGS gauge 10010000](https://waterdata.usgs.gov/monitoring-location/10010000/)

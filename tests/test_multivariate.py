@@ -69,3 +69,11 @@ def test_falls_back_when_covariates_missing_at_cutoff(synthetic):
     train.loc[train.index[-1], ["swe_eom_gsl", "prec_wy_eom_gsl"]] = np.nan
     preds = SweRegressionForecaster().fit(train).predict(3)
     assert preds["pred"].notna().all()
+
+
+def test_contributions_reconcile_to_prediction(synthetic):
+    cutoff = pd.Timestamp("2015-03-01")
+    model = SweRegressionForecaster().fit(synthetic[synthetic["month"] <= cutoff])
+    predictions = model.predict(6).set_index("month")["pred"]
+    explained = model.contributions(6).groupby("month")["contribution_ft"].sum()
+    assert np.allclose(predictions, explained)

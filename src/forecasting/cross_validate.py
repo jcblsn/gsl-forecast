@@ -10,6 +10,7 @@ from experiment_tracker import ExperimentTracker
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
+from src.forecasting.blend import BLEND_MODEL, cross_fitted_predictions
 from src.forecasting.data import load_monthly_data
 from src.forecasting.headline import (
     headline_metrics,
@@ -115,7 +116,9 @@ def log_to_tracker(
     summary: pd.DataFrame,
     headline_summary: pd.DataFrame | None = None,
 ) -> None:
+    logged = set()
     for forecaster in forecasters:
+        logged.add(forecaster.name)
         run_id = tracker.start_run(exp_id)
         tracker.log_model(run_id, forecaster.name, forecaster.get_metrics())
         model_df = cv_df[cv_df["model"] == forecaster.name]
@@ -137,6 +140,31 @@ def log_to_tracker(
                 metrics[f"cov90_h{h}"] = float(row["cov90"])
         if headline_summary is not None:
             metrics.update(headline_metrics(headline_summary, forecaster.name))
+        tracker.log_metrics(run_id, metrics)
+        tracker.end_run(run_id)
+
+    if BLEND_MODEL in set(cv_df["model"]) - logged:
+        run_id = tracker.start_run(exp_id)
+        tracker.log_model(
+            run_id,
+            BLEND_MODEL,
+            {"components": "swe_head,ets_damped_s12", "weight_fit": "seasonal_monotone_mae"},
+        )
+        model_df = cv_df[cv_df["model"] == BLEND_MODEL]
+        tracker.log_predictions(
+            run_id, predictions=model_df["pred"].tolist(), actual_values=model_df["actual"].tolist()
+        )
+        model_summary = summary[summary["model"] == BLEND_MODEL].set_index("h")
+        metrics = {}
+        for h, row in model_summary.iterrows():
+            metrics[f"mae_h{h}"] = float(row["mae"])
+            metrics[f"rmse_h{h}"] = float(row["rmse"])
+            metrics[f"mae_ratio_h{h}"] = float(row["mae_ratio"])
+            if "crps" in row and pd.notna(row["crps"]):
+                metrics[f"crps_h{h}"] = float(row["crps"])
+                metrics[f"cov90_h{h}"] = float(row["cov90"])
+        if headline_summary is not None:
+            metrics.update(headline_metrics(headline_summary, BLEND_MODEL))
         tracker.log_metrics(run_id, metrics)
         tracker.end_run(run_id)
 
@@ -195,6 +223,13 @@ def run_cross_validation(
         logging.info(f"Cutoff {i}/{len(cutoffs)}: {cutoff.date()}")
         results.append(evaluate_at_cutoff(data, cutoff, forecasters, horizon, train_start))
     cv_df = pd.concat(results, ignore_index=True)
+    try:
+        blend_cv = cross_fitted_predictions(cv_df)
+    except ValueError as error:
+        logging.warning(f"Could not score {BLEND_MODEL}: {error}")
+    else:
+        if not blend_cv.empty:
+            cv_df = pd.concat([cv_df, blend_cv], ignore_index=True)
     summary = summarize(cv_df)
     headline = headline_scores(cv_df, data)
     headline_summary = summarize_headline(headline)

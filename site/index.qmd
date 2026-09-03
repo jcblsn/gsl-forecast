@@ -1,0 +1,145 @@
+---
+title: Great Salt Lake Forecast
+title-block-style: none
+---
+
+```{ojs}
+//| echo: false
+bundle = FileAttachment("data/latest.json").json()
+status = FileAttachment("data/status.json").json()
+targets = bundle.targets ?? []
+headline = targets[0]
+formatMonth = (value) => value ? new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {month: "long", year: "numeric"}) : "Pending"
+formatFeet = (value) => Number.isFinite(value) ? `${value.toFixed(2)} ft` : "Not available"
+formatValue = (value) => Number.isFinite(value) ? value.toFixed(3) : "Not used"
+formatContribution = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(3)} ft` : "Not available"
+stale = status.attempted_issue && bundle.issue && status.attempted_issue !== bundle.issue
+```
+
+```{ojs}
+//| echo: false
+headlineView = headline ? html`<section class="headline-band">
+  <div>
+    <p class="eyebrow">${formatMonth(headline.month)} monthly mean</p>
+    <p class="headline-number">${formatFeet(headline.pred)}</p>
+    <p class="range">90% interval ${formatFeet(headline.q05)}–${formatFeet(headline.q95)}</p>
+  </div>
+  <dl class="issue-facts">
+    <div><dt>Issued</dt><dd>${bundle.issue}</dd></div>
+    <div><dt>Model</dt><dd>${bundle.headline_model}</dd></div>
+    <div><dt>Data through</dt><dd>${status.data_max ?? "Pending"}</dd></div>
+  </dl>
+</section>` : html`<section class="headline-band pending">
+  <div><p class="eyebrow">Next monthly mean</p><p class="headline-number">Pending</p>
+  <p class="range">The first complete headline issue has not run.</p></div>
+</section>`
+```
+
+```{ojs}
+//| echo: false
+staleNotice = stale
+  ? html`<div class="data-notice" role="status">The latest run had incomplete inputs. This page keeps the complete ${bundle.issue} issue.</div>`
+  : html``
+```
+
+## Forecast path
+
+The line is the current headline model. The band contains the central 90% of past
+walk-forward errors at each lead.
+
+```{ojs}
+//| echo: false
+history = (bundle.observations ?? []).map(d => ({...d, month: new Date(`${d.month}T00:00:00`)}))
+path = targets.map(d => ({...d, month: new Date(`${d.month}T00:00:00`)}))
+forecastPlot = path.length ? Plot.plot({
+  height: 410,
+  marginLeft: 62,
+  marginBottom: 44,
+  x: {label: null, grid: false},
+  y: {label: "Elevation (ft)", grid: true},
+  marks: [
+    Plot.areaY(path, {x: "month", y1: "q05", y2: "q95", fill: "#98c9cb", fillOpacity: 0.42}),
+    Plot.lineY(history, {x: "month", y: "elevation", stroke: "#202a27", strokeWidth: 2}),
+    Plot.lineY(path, {x: "month", y: "pred", stroke: "#087f8c", strokeWidth: 3}),
+    Plot.dot(path.slice(0, 1), {x: "month", y: "pred", fill: "#c84a3d", r: 5}),
+    Plot.ruleY([4190], {stroke: "#c49a27", strokeDasharray: "5,4"})
+  ]
+}) : html`<p class="empty-state">Forecast data will appear after the next complete run.</p>`
+```
+
+## Held-out error
+
+Mean absolute error from predictions for years excluded from blend calibration.
+
+```{ojs}
+//| echo: false
+scoreLeads = new Set([1, 6, 12, 24])
+scores = (bundle.calibration?.held_out_mae ?? []).filter(d => scoreLeads.has(d.h))
+scoreView = scores.length ? html`<dl class="score-band">
+  ${scores.map(d => html`<div><dt>${d.h}-month</dt><dd>${d.mae_ft.toFixed(3)} ft</dd><small>${d.n} forecasts</small></div>`)}
+</dl>` : html`<p class="empty-state compact">Held-out scores will appear with the next calibrated issue.</p>`
+```
+
+## What moves each date
+
+Each bar is the fitted contribution relative to the historical input mean for that cutoff
+month. The terms add to the selected point forecast with the reference path.
+
+```{ojs}
+//| echo: false
+targetOptions = targets.length ? targets.map(d => ({label: formatMonth(d.month), value: d.h})) : [{label: "Pending", value: 1}]
+viewof selectedH = Inputs.select(targetOptions, {label: "Target month", format: d => d.label, value: targetOptions[0]})
+selectedLead = selectedH.value
+selected = targets.find(d => d.h === selectedLead)
+labels = ({
+  avg_elevation: "Current lake level",
+  swe_eom_gsl: "Snow water equivalent",
+  prec_wy_eom_gsl: "Water-year precipitation",
+  head_diff_ft: "Arm head difference"
+})
+drivers = (selected?.contributions ?? [])
+  .filter(d => d.input !== "reference_path")
+  .map(d => ({...d, label: labels[d.input] ?? d.input}))
+reference = (selected?.contributions ?? []).find(d => d.input === "reference_path")
+```
+
+```{ojs}
+//| echo: false
+driverSummary = selected ? html`<div class="target-summary">
+  <span><strong>${formatFeet(selected.pred)}</strong> forecast</span>
+  <span><strong>${Math.round(selected.swe_weight * 100)}%</strong> SWE-model weight</span>
+  <span><strong>${formatFeet(reference?.contribution_ft)}</strong> reference path</span>
+</div>` : html``
+```
+
+```{ojs}
+//| echo: false
+driverPlot = drivers.length ? Plot.plot({
+  height: 260,
+  marginLeft: 170,
+  marginBottom: 42,
+  x: {label: "Contribution to elevation (ft)", grid: true},
+  y: {label: null, domain: drivers.map(d => d.label)},
+  color: {domain: ["Lower", "Raise"], range: ["#c84a3d", "#087f8c"], legend: true},
+  marks: [
+    Plot.barX(drivers, {x: "contribution_ft", y: "label", fill: d => d.contribution_ft < 0 ? "Lower" : "Raise", tip: true}),
+    Plot.ruleX([0], {stroke: "#202a27"})
+  ]
+}) : html`<p class="empty-state">Input contributions will appear with the first complete issue.</p>`
+```
+
+```{ojs}
+//| echo: false
+driverDetails = drivers.length ? html`<dl class="driver-values">
+  ${drivers.map(d => html`<div>
+    <dt>${d.label}</dt>
+    <dd class="driver-contribution">${formatContribution(d.contribution_ft)}</dd>
+    <dd>Input ${formatValue(d.value)}; historical mean ${formatValue(d.reference)}</dd>
+  </div>`)}
+</dl>` : html``
+```
+
+<div class="method-link">
+[Read the statistical specification](methodology.qmd) for the fitted regressions, blend
+calibration, held-out scoring, and interpretation limits.
+</div>

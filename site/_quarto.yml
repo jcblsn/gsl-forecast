@@ -1,0 +1,32 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Great Salt Lake Forecast"
+  site-url: "https://jcblsn.github.io/gsl-forecast/"
+  repo-url: "https://github.com/jcblsn/gsl-forecast"
+  repo-actions: [source, issue]
+  navbar:
+    left:
+      - href: index.qmd
+        text: Forecast
+      - href: methodology.qmd
+        text: Method
+    right:
+      - icon: github
+        href: "https://github.com/jcblsn/gsl-forecast"
+        aria-label: Source repository
+  page-footer:
+    left: "South-arm monthly mean at USGS Saltair gauge 10010000"
+    right: "Data: USGS and NRCS"
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: false
+    page-layout: full
+    include-in-header:
+      text: |
+        <meta name="description" content="A dated 24-month forecast of Great Salt Lake south-arm elevation.">

@@ -6,10 +6,12 @@ import sys
 from datetime import date
 
 import duckdb
+import numpy as np
 import pandas as pd
 import pytest
 from dateutil.relativedelta import relativedelta
 
+from src.forecasting.blend import BLEND_MODEL, ETS_MODEL, SNOW_MODEL
 from src.forecasting.cross_validate import run_cross_validation
 from src.forecasting.run_forecast import run_forecasts
 from src.forecasting.univariate.naive import NaiveForecaster
@@ -37,6 +39,7 @@ def project(tmp_path):
             "horizon": 6,
             "experiment_db": str(tmp_path / "expt.db"),
             "output_dir": str(tmp_path / "outputs"),
+            "headline_model": BLEND_MODEL,
             "cv": {"history_years": 3, "cutoffs": "all"},
         },
     }
@@ -107,6 +110,73 @@ def test_forecasts_table_migrates_old_schema(project):
     assert n_null == 1 and n_total == 7
 
 
+def test_run_forecasts_builds_configured_headline_blend(project):
+    class ComponentForecaster(NaiveForecaster):
+        def __init__(self, name, offset):
+            super().__init__(method="last")
+            self.name = name
+            self.offset = offset
+
+        def predict(self, h, start_date=None):
+            out = super().predict(h, start_date)
+            out["pred"] += self.offset
+            out["model_name"] = self.name
+            return out
+
+        def contributions(self, h):
+            predictions = self.predict(h)
+            return pd.DataFrame(
+                {
+                    "month": predictions["month"],
+                    "h": range(1, h + 1),
+                    "input": "reference_path",
+                    "value": None,
+                    "reference": None,
+                    "contribution_ft": predictions["pred"],
+                }
+            )
+
+    rows = []
+    for year in range(2000, 2008):
+        for issue_month in range(1, 13):
+            cutoff = pd.Timestamp(year, issue_month, 1) - pd.DateOffset(months=1)
+            for h in range(1, 7):
+                actual = 4190.0 + h * 0.1
+                rows.extend(
+                    [
+                        {
+                            "model": SNOW_MODEL,
+                            "cutoff": cutoff,
+                            "h": h,
+                            "pred": actual + 0.1 * h,
+                            "actual": actual,
+                        },
+                        {
+                            "model": ETS_MODEL,
+                            "cutoff": cutoff,
+                            "h": h,
+                            "pred": actual + 0.5,
+                            "actual": actual,
+                        },
+                    ]
+                )
+    cv_path = project["tmp"] / "components.parquet"
+    pd.DataFrame(rows).to_parquet(cv_path, index=False)
+    preds = run_forecasts(
+        config_path=project["config_path"],
+        forecasters=[
+            ComponentForecaster(SNOW_MODEL, 0.1),
+            ComponentForecaster(ETS_MODEL, 0.5),
+        ],
+        cv_results=str(cv_path),
+    )
+    assert set(preds["model_name"]) == {SNOW_MODEL, ETS_MODEL, BLEND_MODEL}
+    assert preds.attrs["headline_model"] == BLEND_MODEL
+    explained = preds.attrs["contributions"].groupby("h")["contribution_ft"].sum()
+    blended = preds[preds["model_name"] == BLEND_MODEL].set_index(np.arange(1, 7))["pred"]
+    assert np.allclose(explained, blended)
+
+
 @pytest.mark.parametrize(
     "module",
     [
@@ -131,7 +201,7 @@ def test_data_status_flags_thin_month_and_null_covariates(project):
 
     meta, problems = data_status(project["db_path"])
     assert meta["data_max"] == "2019-12-01" and meta["observation_count"] == 30
-    assert problems == ["null at cutoff: ['swe_eom_gsl', 'prec_wy_eom_gsl']"]
+    assert problems == ["null at cutoff: ['swe_eom_gsl', 'prec_wy_eom_gsl', 'head_diff_ft']"]
     with duckdb.connect(project["db_path"]) as conn:
         conn.execute(
             "UPDATE monthly_elevation SET observation_count = 3 WHERE month = '2019-12-01'"

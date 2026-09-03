@@ -31,4 +31,5 @@ ENV/
 # Distribution / packaging
 dist/
 build/
+site/_site/
 *.egg-info/

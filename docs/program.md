@@ -54,8 +54,7 @@ Columns already in `monthly_covariates` (see the README data section):
 - `head_diff_ft` in the `inflow_chain` bucket step (it already helps `swe_regression`).
 - Ridge `alpha` well above 1e-3 for any model with three or more features.
 - Stacking: regress `ets_damped_s12` residuals at each horizon on snowpack anomalies.
-- A blend that follows `swe_regression` at leads 1-12 and moves to `ets_damped_s12` by
-  lead 24, registered as its own model so it is exported and verified.
+- Residual stacking as an alternative to the current `swe_ets_blend_v1` model.
 
 Needs pipeline work first:
 

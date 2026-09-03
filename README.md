@@ -36,7 +36,8 @@ The benchmark to beat in season is the NRCS outlook; out of season the benchmark
 - [x] Autoresearch program for the multivariate models (`docs/program.md`); loop not yet run
 - [x] Bathymetry (USGS elevation-area-volume table) as `inflow_chain_area`; climate-division temperature and precipitation ingested
 - [ ] Reservoir storage and percent-of-median snowpack in the production models (via the program loop)
-- [ ] One blended official model for the 24-month product
+- [x] A versioned SWE and ETS blend for the current 24-month headline
+- [x] A Quarto public page with the next-month forecast and date-level input contributions
 
 ## Overview
 
@@ -53,7 +54,9 @@ uv sync
 uv run --frozen pytest
 ```
 
-Modelling choices live in `config/config.json` under `forecasting`: `train_start`, `horizon` (24 months), `experiment_db`, `output_dir`, and the CV cutoff policy. CLI flags override config; anything not passed falls back to config.
+Modelling choices live in `config/config.json` under `forecasting`. The `headline_model`
+setting selects the model that supplies the public headline. This role can move to a later
+model without changing the model implementation.
 
 ## CLI Commands
 
@@ -74,10 +77,16 @@ USGS WaterServices, the old source, is decommissioned in early 2027; the pipelin
 Fits the production subset of models (see `src/forecasting/registry.py`) on history from `train_start` and writes forward predictions to the `forecasts` table, tagged with `run_id`, `experiment_id`, and `data_max` so every prediction is traceable to a run and a data vintage.
 
 ```bash
-uv run gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09.csv --intervals outputs/cv_results_<stamp>.parquet] [--allow-incomplete]
+uv run gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09.csv --cv-results outputs/cv_results_<stamp>.parquet] [--site-data-dir site/data] [--allow-incomplete]
 ```
 
-`--export` writes a dated forecast file (issue month, target month, lead, model, point forecast, and q05-q95 when `--intervals` names a CV results file to take empirical error quantiles from) and a `<stamp>.meta.json` sidecar with the data vintage. Before fitting, the CLI checks that the series ends last month, that the last month has at least 28 daily readings, and that the snowpack covariates are present at the cutoff; `--allow-incomplete` overrides the last two checks, a stale series always stops the run. The monthly GitHub Actions workflow (`.github/workflows/forecast.yml`) runs pipeline, CV, forecast and verification, retries the forecast with `--allow-incomplete` if the strict run fails, and commits the file under `forecasts/`.
+`--cv-results` supplies the walk-forward predictions for blend weights and empirical
+intervals. `--intervals` remains an alias. A complete headline issue also writes an
+`<issue>.explain.json` sidecar with the fitted input contributions for all 24 dates.
+
+The CLI checks the data date, observation count, snowpack values, and arm head difference.
+An incomplete run can export the other models. It does not replace the last complete public
+headline. The monthly workflow commits the dated files and the current site data.
 
 ### Walk-forward cross-validation
 
@@ -156,7 +165,7 @@ Headline scalars by issue date (MAE, ft). Issue date means the outlook made from
 | Water-year end | Jul 1 | 0.29 | 0.37 | 0.55 | 1.61 |
 | Water-year end | Aug 1 | 0.19 | 0.19 | 0.30 | 1.05 |
 
-Snowpack resolves the winter case: from a January 1 issue the univariate model's peak error was no better than naive; with month-end SWE it roughly halves. After the peak, the summer decline is also predictable: from a June 1 issue the September level is known to about a third of a foot, against 1.8 ft for persistence. `inflow_chain_area` (lake area in place of level in the bucket step) scores within 0.02 ft of `inflow_chain` at every lead, so the hypsometry does not yet add skill. Beyond 18 months the covariate models lose to the univariate ones, since snowpack known today says nothing about the next winter, so the 24-month product should blend toward `ets_damped_s12` at long leads (on the roadmap).
+Snowpack resolves the winter case: from a January 1 issue the univariate model's peak error was no better than naive; with month-end SWE it roughly halves. After the peak, the summer decline is also predictable: from a June 1 issue the September level is known to about a third of a foot, against 1.8 ft for persistence. `inflow_chain_area` (lake area in place of level in the bucket step) scores within 0.02 ft of `inflow_chain` at every lead, so the hypsometry does not yet add skill. Beyond 18 months the covariate models lose to the univariate ones. The current headline model learns a decreasing SWE-model weight for the 24-month path.
 
 ### Against the NRCS record
 
@@ -211,6 +220,7 @@ CV runs log `mae_h<h>`, `rmse_h<h>`, and `mae_ratio_h<h>` (MAE divided by `naive
 | `swe_regression` | For the cutoff's calendar month and each lead, regresses the change in elevation on current level, basin month-end SWE and water-year precipitation across past years (the NRCS outlook generalised to every month and lead) |
 | `inflow_chain` | Snowpack predicts each future month's tributary inflow; a fitted monthly bucket step (change as a function of that month's inflow and the starting level) rolls the elevation forward |
 | `swe_head` | `swe_regression` plus the south-minus-north head difference; the best spring-peak model from January and February issues in CV, worse beyond lead 15 |
+| `swe_ets_blend_v1` | A seasonal, monotone blend of `swe_head` and `ets_damped_s12`; each monthly run learns its weights from walk-forward absolute error |
 | `inflow_chain_area` | The same with lake area from the USGS hypsometry in place of the level, so the evaporation term scales with area |
 
 All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(df)`, `predict(h)`, and `get_metrics()`. The single list of models is `all_forecasters()` in `src/forecasting/registry.py`; `production_forecasters()` is the subset written by `gsl-forecast`.
@@ -226,6 +236,7 @@ src/
     climate.py          # NOAA nClimDiv monthly temperature and precipitation
   forecasting/
     base.py             # Forecaster ABC
+    blend.py            # Seasonal SWE and ETS blend calibration
     registry.py         # The one list of models (all / production subset)
     run_forecast.py     # Fit production models, store predictions with run identity
     cross_validate.py   # Walk-forward CV, per-cutoff parquet, per-horizon metrics
@@ -257,6 +268,7 @@ data/
   external/gsl_south_arm_hypsometry.csv  # USGS 2023 elevation-area-volume table, 0.1 ft steps
 forecasts/              # Dated forecast CSVs and meta sidecars committed by the monthly workflow
 docs/                   # Surveys, literature review, and the autoresearch program
+site/                   # Quarto public forecast and its current data files
 outputs/                # gitignored: CV parquet and PNGs
 ```
 
@@ -287,6 +299,7 @@ Before 1960 the daily table holds about one reading per month, and before 1980 a
 uv run --frozen pytest
 uv run --frozen ruff check src tests
 uv run --frozen ruff format --check src tests
+quarto render site
 ```
 
-CI runs the same three commands on every push.
+CI runs the same checks on every push.
