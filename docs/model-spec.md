@@ -174,16 +174,26 @@ The inflow column enters in units of its own standard deviation. In kaf its coef
 near 0.001 while a monthly term is near 0.1, and the optimizer fails a line search on that
 spread.
 
-Result, from the run in `docs/autoresearch.log` dated 2026-09-03: the model is worse than
-`blend` at every lead, and worse than `inflow_chain` to lead 8. From lead 12 it is better
-than `inflow_chain` (1.23 ft against 1.32 ft), and it stays better to lead 24 (2.14 ft
-against 2.32 ft). It has the lowest CRPS at lead 12 of any model in the run, 0.318 ft. It
-gives the best water-year end of any model from a February, March or April issue, and a poor
-one from July and August.
+The state intercept needs care. statsmodels writes the transition as
+`alpha_(t+1) = c_t + T alpha_t`, so the intercept at t drives the level at t + 1. Both driver
+arrays therefore move back 1 step, and the intercept at t carries the term and the inflow
+for t + 1. Without the shift the fit puts each monthly term 1 month early, and the forecast
+reaches its peak and its trough 1 month before the record does.
 
-That pattern is the one the literature reports for an iterated model against a direct one:
-weaker at short leads, stronger as the lead grows. It is the first model here with that
-shape. The registry holds it, and `PRODUCTION_MODELS` does not, because it has no
+Result, from the run in `docs/autoresearch.log` dated 2026-09-03: the model is better than
+`inflow_chain`, the model it restates, at every lead and on the spring peak. It is worse
+than `blend` at every lead. Its CRPS at lead 12 is 0.324 ft against 0.352 ft for `blend`,
+which is the only part of the go criterion it meets.
+
+| Metric | state_space | inflow_chain | blend |
+|---|---|---|---|
+| Spring peak, February issue | 0.578 | 0.625 | 0.573 |
+| MAE lead 6 | 0.642 | 0.681 | 0.521 |
+| MAE lead 12 | 1.214 | 1.320 | 1.069 |
+| MAE lead 24 | 2.126 | 2.315 | 1.999 |
+| CRPS lead 12 | 0.324 | 0.320 | 0.352 |
+
+The registry holds the model. `PRODUCTION_MODELS` does not, because it has no
 `contributions` method for the public page.
 
 ## 5 The blend

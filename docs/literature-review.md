@@ -138,9 +138,9 @@ deterministic mass balance with no account of measurement error.
 Takeaway, and the reason it matters here: the models in this repository are all direct. Each
 lead has its own fit, so nothing links the 24 months of a path, and the interval comes from
 past errors rather than from the model. `state_space` (section 4.1 of `docs/model-spec.md`)
-is the first iterated model here, and it does show the reported shape: worse than
-`inflow_chain` to lead 8, better from lead 12 to lead 24, with the lowest CRPS at lead 12 of
-any model. It does not yet beat `blend`.
+is the first iterated model here. It is better than `inflow_chain`, the recursion it
+replaces, at every lead and on the spring peak, and its CRPS at lead 12 is better than
+`blend`. Its point forecast does not yet beat `blend` at any lead.
 
 ## 5. Area and volume
 
