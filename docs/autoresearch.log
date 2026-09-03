@@ -30,3 +30,19 @@
 # The 1-month error came from the statsmodels convention alpha_(t+1) = c_t + T alpha_t: the
 # state intercept at t drives the level at t + 1, so month t's term was attributed to month
 # t + 1 and the forecast peaked 1 month early. The user saw it in the hindcast charts.
+# 2026-09-03: the 3-component blend (exp 23), open question 5. The weight is now a vector on
+# the simplex in steps of 0.05, and the condition is on the covariate share, not on each
+# component. Baselines from the same run: blend 0.573 | 0.521 | 0.186 | 0.503 | 0.188, with
+# mae_h12 1.069, mae_h18 1.615, mae_h24 1.999, crps_h12 0.352.
+2026-09-03 | blend3_swe | swe_head + swe_regression + ets_damped_s12 (exp 23) | 0.577 | 0.510 | 0.181 | 0.461 | 0.183 | - | better than blend on 9 of 11 metrics: mae_h6 0.510 v 0.521, mae_h12 1.046 v 1.069, mae_h18 1.583 v 1.615, mae_h24 1.975 v 1.999, crps_h6 0.181 v 0.186, crps_h12 0.343 v 0.352, wyend_apr 0.461 v 0.503. It is worse on the registered metric by 0.004 ft, so the keep rule says revert. Registered, not promoted; see the note below
+2026-09-03 | blend3_state | swe_head + state_space + ets_damped_s12 (exp 23) | 0.574 | 0.524 | 0.186 | 0.511 | 0.196 | - | the best crps_h12 of any blend, 0.339. state_space earns real weight at leads 18 to 24 in the accumulation season (0.40 and 0.20), which is where blend is weakest. Same verdict as above: peak_mae_feb 0.574 v 0.573
+2026-09-03 | blend3_chain | swe_head + inflow_chain + ets_damped_s12 (exp 23) | 0.583 | 0.525 | 0.186 | 0.506 | 0.190 | - | the weakest of the 3. inflow_chain takes almost no weight, so its low crps_h6 does not survive the mix
+# Note on the keep rule. All 3 miss peak_mae_feb by 0.003 to 0.010 ft against blend, which
+# is under a tenth of an inch on 13 February cutoffs, while the gains at leads 12 to 24 are
+# 3 to 10 times larger. The rule names only the peak, and this item targeted the far end.
+# The headline stays `blend` until a person decides, because config/config.json names it.
+# Caution: the split inside the covariate share swings between leads (accumulation h6 is
+# 1.00 on swe_head, h9 is 0.65/0.35, h12 is 0.55/0.45). The share itself is well behaved.
+# Open question 7, a smooth curve over the issue month, should come before any promotion.
+# Lead 24 is unchanged in kind: blend_swe is still the best blend there at 1.855 ft, and
+# naive_last still beats every model at 1.793 ft.

@@ -74,6 +74,7 @@ In season, the forecast to beat is the NRCS outlook. Out of season, the comparis
 - [x] Bathymetry (USGS elevation-area-volume table) as `inflow_chain_area`; climate-division temperature and precipitation ingested
 - [x] One blended official model for the 24-month product (`blend`), and a public page on GitHub Pages
 - [ ] Reservoir storage and percent-of-median snowpack in the production models (via the program loop)
+- [ ] A smooth weight curve over the issue month, before a 3-component blend takes the headline
 - [ ] A performance page for out-of-sample accuracy
 
 ## Overview
@@ -323,6 +324,7 @@ The table gives the name of each model in the code. The first 9 use the lake rec
 | `inflow_chain_area` | The same with lake area from the USGS hypsometry in place of the level, so the evaporation term scales with area |
 | `state_space` | The same water balance as a state-space model: the level is a latent state, a Kalman filter gives the likelihood, and the 24-month path is 1 recursion, so its interval widens with the lead on its own. Better than `inflow_chain` at every lead; worse than `blend` |
 | `blend` | The official model: `w` on `swe_head` and `1 - w` on `ets_damped_s12`, with `w` fitted for each lead and each issue season, and forced to fall with the lead |
+| `blend3_swe`, `blend3_chain`, `blend3_state` | The same mix over 3 components on a simplex, with `swe_regression`, `inflow_chain` or `state_space` in the second place. Better than `blend` at leads 6 to 24; not the headline, see `docs/autoresearch.log` |
 | `blend_swe` | The same with `swe_regression` as the snowpack component |
 
 All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(df)`, `predict(h)`, and `get_metrics()`. The single list of models is `all_forecasters()` in `src/forecasting/registry.py`; `production_forecasters()` is the subset written by `gsl-forecast`.
