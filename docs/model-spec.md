@@ -111,6 +111,13 @@ median endpoint-to-target change among origins in the same calendar month. The m
 remains the target; the endpoint is only the initial state. If endpoint fields are unavailable,
 the latest monthly mean provides an explicit compatibility fallback.
 
+`endpoint_analog` is the same model with `n_analogs` set to 8. It takes the median over the 8
+past origins whose own level was closest to the level now, instead of over every past origin
+in the same calendar month. The change from a 4,190 ft origin is not the change from a 4,200
+ft origin: the surface area differs, so the same volume moves the level by a different amount,
+and the lake reverts toward its own long-run level. This is the level-conditioned
+seasonal-change climatology the review asks for as a stronger baseline than `naive_last`.
+
 ## 3 The swe_regression model
 
 This model generalises the NRCS outlook to every calendar month and every lead.

@@ -51,3 +51,39 @@ def test_monthly_mean_is_a_compatible_fallback():
 
     assert model.anchor_column == "avg_elevation"
     assert np.isfinite(model.predict(6)["pred"]).all()
+
+
+def test_analogs_take_the_origins_whose_level_was_nearest():
+    """The change from a 4,190 ft origin is not the change from a 4,200 ft origin."""
+    months, levels = [], []
+    for year in range(1990, 2020):
+        for month in range(1, 13):
+            months.append(pd.Timestamp(year=year, month=month, day=1))
+            # A level that alternates between a low regime and a high regime by year, and a
+            # January-to-February change that depends on which regime the origin sits in.
+            base = 4190.0 if year % 2 else 4200.0
+            levels.append(base + (1.0 if month == 2 and base == 4190.0 else 0.0))
+    data = pd.DataFrame({"month": months, "avg_elevation": levels})
+    january = data[data["month"] <= pd.Timestamp("2019-01-01")]
+
+    everything = EndpointSeasonalForecaster(min_obs=2).fit(january).predict(1)["pred"].iloc[0]
+    analog = (
+        EndpointSeasonalForecaster(min_obs=2, n_analogs=5, name="endpoint_analog")
+        .fit(january)
+        .predict(1)["pred"]
+        .iloc[0]
+    )
+    assert january["avg_elevation"].iloc[-1] == pytest.approx(4190.0)
+    assert analog == pytest.approx(4191.0)
+    assert everything < analog
+
+
+def test_the_analog_count_travels_with_the_fit():
+    data = pd.DataFrame(
+        {
+            "month": pd.date_range("2000-01-01", periods=60, freq="MS"),
+            "avg_elevation": np.linspace(4190.0, 4195.0, 60),
+        }
+    )
+    assert EndpointSeasonalForecaster().fit(data).get_metrics()["n_analogs"] == "all"
+    assert EndpointSeasonalForecaster(n_analogs=8).fit(data).get_metrics()["n_analogs"] == 8

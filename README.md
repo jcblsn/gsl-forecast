@@ -394,6 +394,7 @@ head difference and hypsometry.
 | `naive_last` | Repeat the latest monthly mean |
 | `naive_seasonal` | Repeat same month from prior year |
 | `endpoint_seasonal` | Select the last reading, 3-day median, or 7-day median by expanding training error, then add the historical median change for the issue month and lead |
+| `endpoint_analog` | `endpoint_seasonal` with the median taken over the 8 past origins whose own level was closest to the level now, so the seasonal change is conditioned on the level |
 | `ma_simple_{3,6,12}` | Simple moving average over N months |
 | `drift_{12,24,60}m` | Project average slope over last N months |
 | `ets_add_s12` | Holt-Winters: additive trend + additive seasonal |

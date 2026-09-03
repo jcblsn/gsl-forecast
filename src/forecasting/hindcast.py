@@ -36,6 +36,8 @@ VARIANT_OF = {
     "blend_swe": ("blend", "dashed"),
     "inflow_chain_area": ("inflow_chain", "dashed"),
     "state_space": ("ets_damped_s12", "dotted"),
+    "endpoint_seasonal": ("naive_last", "dashed"),
+    "endpoint_analog": ("naive_last", "dotted"),
 }
 
 
