@@ -131,14 +131,14 @@ USGS WaterServices, the old source, is decommissioned in early 2027; the pipelin
 Fits the production subset of models (see `src/forecasting/registry.py`) on history from `train_start` and writes forward predictions to the `forecasts` table, tagged with `run_id`, `experiment_id`, and `data_max` so every prediction is traceable to a run and a data vintage.
 
 ```bash
-uv run --frozen gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09-01.csv --intervals outputs/cv_results_<stamp>.parquet] [--site-data-dir site/data] [--allow-incomplete]
+uv run --frozen gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09-01.csv --intervals] [--site-data-dir site/data] [--allow-incomplete]
 ```
 
 `--export` writes a dated forecast file (issue month, target month, lead, model, point forecast, and q05-q95 when `--intervals` names a CV results file to take empirical error quantiles from) and a `<stamp>.meta.json` sidecar with the data vintage and the headline calibration. A complete headline issue also writes a `<stamp>.explain.json` sidecar with the input contributions for all 24 target dates. `--site-data-dir` writes the JSON files the public page reads; an incomplete run updates the status file only, so the published headline stays in place. Before fitting, the CLI checks that the series ends last month, that the last month has at least 28 daily readings, and that the snowpack covariates and the arm head difference are present at the cutoff; `--allow-incomplete` overrides the last two checks, a stale series always stops the run. The monthly GitHub Actions workflow (`.github/workflows/forecast.yml`) runs pipeline, CV, forecast and verification, retries the forecast with `--allow-incomplete` if the strict run fails, and commits the file under `forecasts/`.
 
 ### Walk-forward cross-validation
 
-Uses every month-end cutoff in the last `history_years` (about 170) by default, fits every registered model at each cutoff, evaluates at h=1..24, and logs per-horizon MAE, RMSE, and MAE relative to `naive_last` to the experiment tracker. Per-cutoff results are saved as parquet under `outputs/` so errors can be sliced by season of cutoff.
+Uses every month-end cutoff in the last `history_years` (about 170) by default, fits every registered model at each cutoff, evaluates at h=1..24, and logs MAE, RMSE, and MAE relative to `naive_last` by lead to the experiment tracker. Per-cutoff results are saved as parquet under `outputs/` so errors can be sliced by season of cutoff, and the run records that file, so `gsl-forecast --intervals` finds it without being told the path.
 
 ```bash
 uv run --frozen gsl-cv [--n-cutoffs 20] [--horizon 24] [--history-years 15] [--train-start 1960-01-01] [--output-dir outputs] [--no-plots]
@@ -197,7 +197,7 @@ uv run --frozen gsl-plot [--history-years 10] [--output outputs/gsl_forecast.png
 
 Walk-forward cross-validation: 157 month-end cutoffs from August 2011 to August 2024,
 24-month horizon, training from 1960, data through August 2026. Every number below comes
-from one run, `GSL_CV_20260903_0004`, and `data/results/` holds that run. MAE is in feet.
+from one run, `GSL_CV_20260903_0004`, and the snapshot in `data/results/` holds that run. MAE is in feet.
 The ratio is `blend` MAE divided by `naive_last` MAE at the same lead, so below 1.00 beats
 a repeat of the last value. `gsl-results --tables` prints these 3 tables from those files,
 so a published number and the run behind it cannot drift apart.
@@ -273,33 +273,58 @@ Seven issues is too few to rank anyone. Two caveats favour the models: they use 
 
 ## Querying Results
 
-The experiment tracker CLI (`expt`) can query any logged metric:
+The experiment tracker CLI (`expt`) can query any logged metric. It finds
+`forecast_experiments.db` by itself, so no `--db` flag is needed from the repository root:
 
 ```bash
-# List all experiments
-expt --db forecast_experiments.db list
+# List experiments, newest first
+expt list
 
-# Show all runs for an experiment (includes per-horizon MAE/RMSE)
-expt --db forecast_experiments.db runs <experiment_id>
+# Runs for an experiment, with their notes
+expt runs <experiment_id>
 
-# Find the best model at a specific horizon
-expt --db forecast_experiments.db best <experiment_id> --metric mae_h6 --minimize
+# The best model at a lead. Lowest wins, because the metric is an error
+expt best <experiment_id> --metric mae --dim h=6
 
-# Aggregate metrics across all runs in an experiment
-expt --db forecast_experiments.db aggregate <experiment_id> --metric mae_h1
+# MAE by lead, one column per lead
+expt metrics --metric mae --pivot h
+
+# What changed between 2 runs
+expt diff <run_a> <run_b> --metric mae
+
+# One line per run, the shape of docs/autoresearch.log
+expt log <experiment_id> --metric mae --dim h=6
+
+# Recompute a stored metric from the prediction rows behind it
+expt audit <run_id> --metric mae --dim h=6
 ```
 
-CV runs log `mae_h<h>`, `rmse_h<h>`, and `mae_ratio_h<h>` (MAE divided by `naive_last` MAE at the same horizon) for every lead per model, so any horizon is directly queryable. `uv run --frozen gsl-results <experiment_id>` prints a table of the metrics the autoresearch loop compares, ranked by `mae_h6`; `--metric` changes the rank and `--all-metrics` prints every logged lead.
+CV runs log `mae`, `rmse` and `mae_ratio` (MAE divided by `naive_last` MAE at the same lead),
+plus `crps` and `cov90`, each carrying its lead as a dimension rather than in its name. The
+2 headline scalars carry `target` and `issue` the same way. `uv run --frozen gsl-results
+<experiment_id>` prints a table of the metrics the autoresearch loop compares, ranked by
+`mae_h6`; `--metric` changes the rank and `--all-metrics` prints every logged lead. That
+command names metrics in the `mae_h6` and `peak_mae_feb` style for display, because
+`docs/autoresearch.log` and `docs/program.md` name them that way.
 
-The tracker database is a scratchpad, and `.gitignore` excludes it. The record behind every published number is `data/results/`, which each `gsl-cv` run replaces:
+The tracker database is a working file, and `.gitignore` excludes it. The record behind
+every published number is `data/results/`, a snapshot that each `gsl-cv` run replaces:
 
 | File | Content |
 |---|---|
-| `cv_summary.csv` | MAE, RMSE, MAE ratio, CRPS and 90% coverage per model and lead |
-| `headline_summary.csv` | Spring-peak and water-year-end MAE per model and issue month |
-| `cv_summary.meta.json` | The run label, cutoff span, horizon, `train_start`, data vintage and git commit |
+| `experiment.json` | The run label, cutoff span, horizon, `train_start`, data vintage, git commit, tree state and Python version |
+| `runs.csv` | One row per model, with its parameters, status and note |
+| `metrics.csv` | One row per metric and dimension, so every lead and issue month is in one table |
 
-`uv run --frozen gsl-results --tables` prints the markdown in [Current results](#current-results) from those files, so the published tables and the committed record cannot drift apart.
+The snapshot is sorted and its columns are fixed, so an unchanged run produces an unchanged
+diff. `uv run --frozen gsl-results --tables` prints the markdown in
+[Current results](#current-results) from those files, so the published tables and the
+committed record cannot drift apart.
+
+Prediction rows stay in the database rather than the snapshot, because there are about 87,000
+of them per run. So `expt audit` checks a published number against its own rows locally, and
+the committed snapshot carries the summary rather than the evidence.
+
 
 ## Models
 

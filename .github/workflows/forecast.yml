@@ -20,21 +20,19 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
       - run: uv run --frozen gsl-pipeline
-      # --path-out names the file this run wrote. Selection by modification time can pick
-      # up a file from an earlier run, and a model missing from it has no interval.
-      - run: uv run --frozen gsl-cv --no-plots --path-out outputs/cv_path.txt
+      - run: uv run --frozen gsl-cv --no-plots
       - name: Forecast
         id: forecast
         continue-on-error: true
         run: |
           uv run --frozen gsl-forecast --export forecasts/$(date -u +%Y-%m)-01.csv \
-            --intervals "$(cat outputs/cv_path.txt)" --site-data-dir site/data
+            --intervals --site-data-dir site/data
       - name: Forecast with incomplete covariates
         if: steps.forecast.outcome == 'failure'
         run: |
           uv run --frozen gsl-forecast --allow-incomplete \
             --export forecasts/$(date -u +%Y-%m)-01.csv \
-            --intervals "$(cat outputs/cv_path.txt)" --site-data-dir site/data
+            --intervals --site-data-dir site/data
       - run: uv run --frozen gsl-verify
       - name: Commit dated forecast and the results record
         run: |

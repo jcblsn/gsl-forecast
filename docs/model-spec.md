@@ -328,13 +328,14 @@ Two caveats apply to every number this harness produces.
 ## 9 Current accuracy
 
 Every published number comes from one cross-validation run, `GSL_CV_20260903_0004`: 157
-cutoffs from 2011-08 to 2024-08, data through 2026-08. `data/results/` holds that run, and
-the repository keeps those files. The README section "Current results" holds the tables, and
-`gsl-results --tables` prints them from the files. `docs/autoresearch.log` records which
-change produced which number.
+cutoffs from 2011-08 to 2024-08, data through 2026-08. `data/results/` holds a snapshot of
+that run, and the repository keeps those files. The snapshot names the git commit that
+produced its numbers, so the run is identified by more than a date. The README section
+"Current results" holds the tables, and `gsl-results --tables` prints them from the snapshot.
+`docs/autoresearch.log` records which change produced which number.
 
-The experiment tracker database is a scratchpad for a run in progress. `.gitignore` excludes
-it, so it cannot be the citation for a published number.
+The experiment tracker database is the working file for a run in progress. `.gitignore`
+excludes it, so the snapshot rather than an experiment id is the citation.
 
 In short:
 

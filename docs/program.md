@@ -19,15 +19,19 @@ pipeline change first, and only then a feature the loop may use.
 
 ## Loop
 
-1. Read the latest experiment's metrics: `uv run gsl-results <experiment_id>`. The
-   committed record of the same run is `data/results/cv_summary.csv`.
+1. Read the latest experiment's metrics: `uv run gsl-results <experiment_id>`, or
+   `expt log --metric mae --dim h=6` for one line per model. The committed record of the
+   same run is the snapshot in `data/results/`.
 2. Propose one change to one multivariate model (features, lags, regularisation, fallback
    rules, the stage-two step in `inflow_chain`, a new model file).
 3. Run the harness. Compare `peak_mae_feb` and `mae_h6` against the previous run and
-   against `ets_damped_s12`.
+   against `ets_damped_s12`. `expt diff <previous_run> <new_run>` prints the deltas, and
+   the runs may sit in different experiments.
 4. Keep the change (commit) if `peak_mae_feb` improves without `mae_h6` getting worse by
    more than 0.05 ft; otherwise revert.
-5. Log one line per experiment in `docs/autoresearch.log`: date, model, change, metrics.
+5. Record the change and the verdict as the run's note, so the ledger comes from the
+   database: `expt log <experiment_id> --metric mae --dim h=6`. Append the line to
+   `docs/autoresearch.log`, which keeps the history from before the notes existed.
 
 ## Guardrails
 

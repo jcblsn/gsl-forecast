@@ -18,7 +18,7 @@ from src.forecasting.headline import (
 )
 from src.forecasting.quantiles import leave_one_year_out_scores
 from src.forecasting.registry import BASELINE, all_forecasters
-from src.forecasting.results import RESULTS_DIR, git_commit, write_results
+from src.forecasting.results import RESULTS_DIR
 
 
 def evaluate_at_cutoff(
@@ -90,33 +90,42 @@ def log_to_tracker(
     summary: pd.DataFrame,
     headline_summary: pd.DataFrame | None = None,
 ) -> None:
+    """One run per model, with the lead and the issue month carried as dimensions."""
     for forecaster in forecasters:
-        run_id = tracker.start_run(exp_id)
         # get_metrics describes the fit at the last cutoff only, not the whole walk, so the
         # key says so. A blend logs the weights it held at that one cutoff.
         last_fit = {f"last_cutoff_{k}": v for k, v in forecaster.get_metrics().items()}
-        tracker.log_model(run_id, forecaster.name, last_fit)
+        run = tracker.run(exp_id, name=forecaster.name, params=last_fit)
         model_df = cv_df[cv_df["model"] == forecaster.name]
         if model_df.empty:
-            tracker.end_run(run_id, success=False, error="Failed at all cutoffs during CV")
+            tracker.end_run(run.run_id, success=False, error="Failed at all cutoffs during CV")
             logging.warning(f"No results for {forecaster.name}; logged as failed run")
             continue
-        tracker.log_predictions(
-            run_id, predictions=model_df["pred"].tolist(), actual_values=model_df["actual"].tolist()
-        )
-        model_summary = summary[summary["model"] == forecaster.name].set_index("h")
-        metrics = {}
-        for h, row in model_summary.iterrows():
-            metrics[f"mae_h{h}"] = float(row["mae"])
-            metrics[f"rmse_h{h}"] = float(row["rmse"])
-            metrics[f"mae_ratio_h{h}"] = float(row["mae_ratio"])
-            if "crps" in row and pd.notna(row["crps"]):
-                metrics[f"crps_h{h}"] = float(row["crps"])
-                metrics[f"cov90_h{h}"] = float(row["cov90"])
-        if headline_summary is not None:
-            metrics.update(headline_metrics(headline_summary, forecaster.name))
-        tracker.log_metrics(run_id, metrics)
-        tracker.end_run(run_id)
+        with run:
+            # The cutoff and the lead are what make a row addressable. Without them the
+            # rows cannot be read back, and a metric cannot be checked against them.
+            run.log_predictions(
+                model_df["pred"].tolist(),
+                model_df["actual"].tolist(),
+                dims=[
+                    {"cutoff": str(pd.Timestamp(cutoff).date()), "h": int(h)}
+                    for cutoff, h in zip(model_df["cutoff"], model_df["h"], strict=True)
+                ],
+            )
+            model_summary = summary[summary["model"] == forecaster.name].set_index("h")
+            for h, row in model_summary.iterrows():
+                values = {
+                    "mae": float(row["mae"]),
+                    "rmse": float(row["rmse"]),
+                    "mae_ratio": float(row["mae_ratio"]),
+                }
+                if "crps" in row and pd.notna(row["crps"]):
+                    values["crps"] = float(row["crps"])
+                    values["cov90"] = float(row["cov90"])
+                run.log_metrics(values, dims={"h": int(h)})
+            if headline_summary is not None:
+                for values, dims in headline_metrics(headline_summary, forecaster.name):
+                    run.log_metrics(values, dims=dims)
 
 
 def print_summary(summary: pd.DataFrame, horizon: int) -> None:
@@ -147,7 +156,6 @@ def run_cross_validation(
     forecasters: list[Forecaster] | None = None,
     make_plots: bool = True,
     results_dir: str | None = None,
-    path_out: str | None = None,
 ) -> pd.DataFrame:
     """Walk-forward CV. Any argument left as None falls back to config/config.json.
 
@@ -188,36 +196,16 @@ def run_cross_validation(
     stamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
     cutoff_desc = "all month-end" if n_cutoffs is None else f"{n_cutoffs} random"
     tracker = ExperimentTracker(experiment_db)
-    exp_id = tracker.create_experiment(
+    # The tracker records the commit, the tree state and the command line by itself. The tags
+    # below are the things it cannot know: the data vintage and the cutoff policy.
+    exp_id = tracker.experiment(
         f"GSL_CV_{stamp}",
         f"Walk-forward CV: {len(cutoffs)} cutoffs ({cutoff_desc}), {horizon}-month horizon, "
         f"last {history_years} years, training from {train_start or 'series start'}",
-    )
-    tags = {
-        "data_min": str(data["month"].min().date()),
-        "data_max": str(data["month"].max().date()),
-        "n_months_available": str(len(data)),
-        "n_cutoffs": str(len(cutoffs)),
-        "cutoff_policy": cutoff_desc,
-        "train_start": train_start or "",
-    }
-    for k, v in tags.items():
-        tracker.log_tag("experiment", exp_id, k, v)
-    log_to_tracker(tracker, exp_id, forecasters, cv_df, summary, headline_summary)
-
-    per_cutoff_path = os.path.join(output_dir, f"cv_results_{stamp}.parquet")
-    cv_df.to_parquet(per_cutoff_path, index=False)
-    headline.to_parquet(os.path.join(output_dir, f"headline_{stamp}.parquet"), index=False)
-    logging.info(f"Saved per-cutoff results to {per_cutoff_path} (experiment {exp_id})")
-    if path_out:
-        with open(path_out, "w") as stream:
-            stream.write(per_cutoff_path + "\n")
-
-    if results_dir:
-        meta = {
-            "run_label": f"GSL_CV_{stamp}",
-            "experiment_id": int(exp_id),
-            "experiment_db": experiment_db,
+        tags={
+            "data_min": str(data["month"].min().date()),
+            "data_max": str(data["month"].max().date()),
+            "n_months_available": len(data),
             "n_cutoffs": len(cutoffs),
             "cutoff_policy": cutoff_desc,
             "first_cutoff": str(cutoffs[0].date()),
@@ -225,15 +213,24 @@ def run_cross_validation(
             "history_years": history_years,
             "horizon": horizon,
             "train_start": train_start or "",
-            "headline_model": fc.get("headline_model"),
-            "models": sorted({f.name for f in forecasters}),
-            "data_min": tags["data_min"],
-            "data_max": tags["data_max"],
-            "git_commit": git_commit(),
-            "generated_at": pd.Timestamp.now().isoformat(timespec="seconds"),
-        }
-        write_results(summary, headline_summary, meta, results_dir)
-        logging.info(f"Wrote the committed results artifact to {results_dir}")
+            "headline_model": fc.get("headline_model") or "",
+            "models": ",".join(sorted({f.name for f in forecasters})),
+        },
+    )
+    log_to_tracker(tracker, exp_id, forecasters, cv_df, summary, headline_summary)
+
+    per_cutoff_path = os.path.join(output_dir, f"cv_results_{stamp}.parquet")
+    cv_df.to_parquet(per_cutoff_path, index=False)
+    headline.to_parquet(os.path.join(output_dir, f"headline_{stamp}.parquet"), index=False)
+    # The run records where the parquet went, so asking the tracker replaces passing a path
+    # between commands in a text file. The path and not the bytes: the predictions table
+    # already holds the same rows, keyed by cutoff and lead.
+    tracker.log_tags("experiment", exp_id, {"cv_parquet": per_cutoff_path})
+    logging.info(f"Saved per-cutoff results to {per_cutoff_path} (experiment {exp_id})")
+
+    if results_dir:
+        tracker.snapshot(exp_id, results_dir)
+        logging.info(f"Wrote the committed results snapshot to {results_dir}")
 
     if make_plots:
         from src.forecasting.plots import plot_cv_mae, plot_cv_ratio
@@ -272,10 +269,6 @@ def main() -> None:
         default=RESULTS_DIR,
         help="Directory for the committed summary files (empty string to skip)",
     )
-    parser.add_argument(
-        "--path-out",
-        help="Write the per-cutoff parquet path to this file, for the next command to read",
-    )
     args = parser.parse_args()
     forecasters = None
     results_dir = args.results_dir or None
@@ -304,7 +297,6 @@ def main() -> None:
         forecasters=forecasters,
         make_plots=not args.no_plots,
         results_dir=results_dir,
-        path_out=args.path_out,
     )
 
 

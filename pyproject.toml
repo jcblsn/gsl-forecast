@@ -7,7 +7,7 @@ name = "gsl-forecast"
 version = "0.1.0"
 description = "Forecasting the Great Salt Lake's depth"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "duckdb>=1.2.0",
     "experiment-tracker",
@@ -37,7 +37,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.uv.sources]
-experiment-tracker = { git = "https://github.com/jcblsn/experiment-tracker.git", rev = "348945b0a1d533f6c37bd4f189cdb88cc8f2cd3c" }
+experiment-tracker = { git = "https://github.com/jcblsn/experiment-tracker.git", tag = "v2.0.1" }
 
 [dependency-groups]
 dev = [

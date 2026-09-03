@@ -77,8 +77,9 @@ def test_summary_and_metric_names(seasonal_data):
     scores = headline_scores(pd.concat(frames), seasonal_data)
     summary = summarize_headline(scores)
     assert set(summary["n"]) == {2}
-    metrics = headline_metrics(summary, "naive_last")
-    assert set(metrics) == {"peak_mae_jan", "wyend_mae_jan"}
+    logged = list(headline_metrics(summary, "naive_last"))
+    assert {(d["target"], d["issue"]) for _, d in logged} == {("peak", "jan"), ("wy_end", "jan")}
+    assert all(set(values) == {"mae", "n"} for values, _ in logged)
 
 
 def test_compare_joins_on_issue_and_year():

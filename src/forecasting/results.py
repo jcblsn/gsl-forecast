@@ -1,21 +1,23 @@
 """The committed record of one cross-validation run.
 
-The experiment tracker database is a working scratchpad, and `.gitignore` excludes it. So it
-cannot be the citation for a published number. This module writes the same numbers to small
-files under `data/results/`, which the repository keeps, and renders the markdown tables in
-the README and in `docs/model-spec.md` from those files.
+The experiment tracker database is a working file that `.gitignore` excludes, so it cannot be
+the citation for a published number. `gsl-cv` writes a snapshot of the run under
+`data/results/`, which the repository keeps. This module reads that snapshot back into the 2
+tables the README and `docs/model-spec.md` are rendered from.
+
+The snapshot is written by the tracker, not here, so it also carries the commit, the tree
+state and the command line that produced the numbers.
 """
 
 import json
 import os
-import subprocess
 
 import pandas as pd
 
 RESULTS_DIR = os.path.join("data", "results")
-CV_SUMMARY = "cv_summary.csv"
-HEADLINE_SUMMARY = "headline_summary.csv"
-META = "cv_summary.meta.json"
+EXPERIMENT = "experiment.json"
+METRICS = "metrics.csv"
+RUNS = "runs.csv"
 
 TABLE_LEADS = (1, 3, 6, 9, 12, 18, 24)
 INTERVAL_LEADS = (6, 12)
@@ -24,44 +26,63 @@ HEADLINE_ROWS = (
     ("wy_end", "Water-year end", ("jan", "apr", "jun", "jul", "aug")),
 )
 
-
-def git_commit() -> str:
-    """The commit that produced the run, or an empty string outside a work tree."""
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return out.stdout.strip() if out.returncode == 0 else ""
+LEAD_METRICS = ("mae", "rmse", "mae_ratio", "crps", "cov90")
 
 
-def write_results(
-    summary: pd.DataFrame,
-    headline_summary: pd.DataFrame,
-    meta: dict,
-    results_dir: str = RESULTS_DIR,
-) -> str:
-    """Write the 2 summary tables and the run description. Returns the directory."""
-    os.makedirs(results_dir, exist_ok=True)
-    summary.sort_values(["model", "h"]).to_csv(
-        os.path.join(results_dir, CV_SUMMARY), index=False, float_format="%.6f"
-    )
-    headline_summary.sort_values(["target", "issue", "model"]).to_csv(
-        os.path.join(results_dir, HEADLINE_SUMMARY), index=False, float_format="%.6f"
-    )
-    with open(os.path.join(results_dir, META), "w") as stream:
-        json.dump(meta, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-    return results_dir
+def _dims(frame: pd.DataFrame) -> pd.DataFrame:
+    """Spread the dims column of a snapshot into real columns."""
+    parsed = frame["dims"].apply(json.loads)
+    for key in sorted({k for row in parsed for k in row}):
+        frame[key] = parsed.apply(lambda row, key=key: row.get(key))
+    return frame
 
 
 def read_results(results_dir: str = RESULTS_DIR) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """The 2 summary tables and the run description, as written by `write_results`."""
-    summary = pd.read_csv(os.path.join(results_dir, CV_SUMMARY))
-    headline = pd.read_csv(os.path.join(results_dir, HEADLINE_SUMMARY))
-    with open(os.path.join(results_dir, META)) as stream:
-        meta = json.load(stream)
+    """The lead table, the headline table, and the run description.
+
+    The snapshot stores one row per metric and dims. The 2 tables are pivots of it: the lead
+    table is keyed by model and lead, the headline table by model, issue month and target.
+    """
+    metrics = _dims(pd.read_csv(os.path.join(results_dir, METRICS)))
+    with open(os.path.join(results_dir, EXPERIMENT)) as stream:
+        record = json.load(stream)
+
+    meta = {**record, **record.get("meta", {}), **record.get("tags", {})}
+    meta["run_label"] = record["name"]
+
+    by_lead = metrics[metrics.get("h").notna()] if "h" in metrics else metrics.iloc[:0]
+    summary = (
+        by_lead.pivot_table(
+            index=["run_name", "h"], columns="metric", values="value", aggfunc="first"
+        )
+        .reset_index()
+        .rename(columns={"run_name": "model"})
+    )
+    summary["h"] = summary["h"].astype(int)
+    summary.columns.name = None
+    for column in LEAD_METRICS:
+        if column not in summary.columns:
+            summary[column] = float("nan")
+
+    if "target" in metrics:
+        headline_rows = metrics[metrics["target"].notna()]
+    else:
+        headline_rows = metrics.iloc[:0]
+    headline = (
+        headline_rows.pivot_table(
+            index=["run_name", "issue", "target"],
+            columns="metric",
+            values="value",
+            aggfunc="first",
+        )
+        .reset_index()
+        .rename(columns={"run_name": "model"})
+    )
+    headline.columns.name = None
+    if "n" in headline.columns:
+        headline["n"] = headline["n"].astype(int)
+    if headline.empty:
+        headline = pd.DataFrame(columns=["model", "issue", "target", "mae", "n"])
     return summary, headline, meta
 
 

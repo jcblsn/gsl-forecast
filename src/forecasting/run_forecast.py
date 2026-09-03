@@ -112,17 +112,16 @@ def run_single_forecaster(
     horizon: int,
     conn: duckdb.DuckDBPyConnection,
 ) -> pd.DataFrame | None:
-    run_id = tracker.start_run(exp_id)
+    run = tracker.run(exp_id, name=forecaster.name)
     try:
-        forecaster.fit(train_df)
-        tracker.log_model(run_id, forecaster.name, forecaster.get_metrics())
-        predictions = forecaster.predict(h=horizon)
-        store_predictions(conn, predictions, run_id, exp_id, train_df["month"].max())
-        tracker.end_run(run_id)
+        with run:
+            forecaster.fit(train_df)
+            tracker.set_params(run.run_id, forecaster.get_metrics())
+            predictions = forecaster.predict(h=horizon)
+            store_predictions(conn, predictions, run.run_id, exp_id, train_df["month"].max())
         return predictions
     except Exception as e:
         logging.error(f"Error running forecaster {forecaster.name}: {e}")
-        tracker.end_run(run_id, success=False, error=str(e))
         return None
 
 
@@ -146,7 +145,7 @@ def run_forecasts(
     configured_headline = fc.get("headline_model")
 
     tracker = ExperimentTracker(experiment_db)
-    exp_id = tracker.create_experiment(
+    exp_id = tracker.experiment(
         f"GSL_Forecast_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}",
         f"Forward forecast, horizon={horizon}, training from {train_start or 'series start'}",
     )
@@ -157,13 +156,16 @@ def run_forecasts(
         ensure_forecasts_table(conn)
         train_df = load_monthly_data(conn, train_start)
         data_min, data_max = train_df["month"].min().date(), train_df["month"].max().date()
-        for k, v in {
-            "data_min": str(data_min),
-            "data_max": str(data_max),
-            "n_months": str(len(train_df)),
-            "train_start": train_start or "",
-        }.items():
-            tracker.log_tag("experiment", exp_id, k, v)
+        tracker.log_tags(
+            "experiment",
+            exp_id,
+            {
+                "data_min": str(data_min),
+                "data_max": str(data_max),
+                "n_months": len(train_df),
+                "train_start": train_start or "",
+            },
+        )
         logging.info(f"Training data: {data_min} to {data_max} ({len(train_df)} months)")
 
         for forecaster in forecasters:
@@ -248,6 +250,20 @@ def headline_calibration(model: Forecaster, horizon: int) -> dict:
     }
 
 
+def latest_cv_parquet(experiment_db: str) -> str:
+    """The per-cutoff file of the newest cross-validation run, from the tracker.
+
+    Selection by modification time can pick up a file from an earlier run, and a model
+    missing from it has no interval. The run records the file it wrote, so ask the run.
+    """
+    with ExperimentTracker(experiment_db) as tracker:
+        for experiment in tracker.experiments():
+            path = tracker.tags("experiment", experiment["experiment_id"]).get("cv_parquet")
+            if path and os.path.exists(path):
+                return path
+    raise SystemExit(f"No cross-validation run recorded in {experiment_db}; run gsl-cv first")
+
+
 def require_intervals(out: pd.DataFrame, cv_parquet: str) -> None:
     """Stop the export when a model has no interval.
 
@@ -262,8 +278,8 @@ def require_intervals(out: pd.DataFrame, cv_parquet: str) -> None:
     missing = sorted(incomplete[incomplete].index)
     if missing:
         raise SystemExit(
-            f"No interval for {missing} in {cv_parquet}; re-run gsl-cv and use the file it "
-            "writes with --path-out"
+            f"No interval for {missing} in {cv_parquet}; re-run gsl-cv and take the path "
+            "from `expt artifacts`"
         )
 
 
@@ -440,7 +456,12 @@ def main() -> None:
     parser.add_argument(
         "--export", help="CSV path for the dated forecast, e.g. forecasts/2026-09-01.csv"
     )
-    parser.add_argument("--intervals", help="cv_results parquet used for empirical intervals")
+    parser.add_argument(
+        "--intervals",
+        nargs="?",
+        const="latest",
+        help="cv_results parquet for empirical intervals; bare flag takes the newest run's",
+    )
     parser.add_argument("--site-data-dir", help="Directory for the public site data files")
     parser.add_argument(
         "--allow-incomplete",
@@ -465,7 +486,13 @@ def main() -> None:
         headline_enabled=not problems,
     )
     if args.export and not preds.empty:
-        exported = export_forecasts(preds, args.export, args.intervals, meta)
+        intervals = args.intervals
+        if intervals == "latest":
+            intervals = latest_cv_parquet(
+                args.experiment_db or config["forecasting"]["experiment_db"]
+            )
+            logging.info(f"Intervals from {intervals}")
+        exported = export_forecasts(preds, args.export, intervals, meta)
         if args.site_data_dir:
             headline_model = preds.attrs.get("headline_model")
             explanation = (

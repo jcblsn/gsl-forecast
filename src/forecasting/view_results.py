@@ -1,8 +1,12 @@
 """Print the metrics of one cross-validation run.
 
 The command has 2 modes. With an experiment id it reads the experiment tracker database,
-which is the working scratchpad for a run in progress. With `--tables` it reads the
-committed files under `data/results/`, which are the record behind every published number.
+which is the working file for a run in progress. With `--tables` it reads the committed
+snapshot under `data/results/`, which is the record behind every published number.
+
+Metrics are stored with their dimensions, so a lead is data and not part of a name. Labels
+like `mae_h6` and `peak_mae_feb` exist only for display and for the command line, because
+`docs/autoresearch.log` and `docs/program.md` name the metrics that way.
 """
 
 import argparse
@@ -14,27 +18,72 @@ from src.forecasting.results import RESULTS_DIR, read_results, render_tables
 
 DEFAULT_METRIC = "mae_h6"
 
-# The columns the autoresearch loop compares. Every other metric stays in the database and
-# comes back with --all-metrics.
+# The columns the autoresearch loop compares, as (metric, dims) pairs. Every other metric
+# stays in the database and comes back with --all-metrics.
 LOOP_METRICS = (
-    "mae_h1",
-    "mae_h3",
-    "mae_h6",
-    "mae_h12",
-    "mae_h18",
-    "mae_h24",
-    "crps_h6",
-    "crps_h12",
-    "cov90_h12",
-    "peak_mae_feb",
-    "wyend_mae_apr",
-    "wyend_mae_aug",
+    ("mae", {"h": 1}),
+    ("mae", {"h": 3}),
+    ("mae", {"h": 6}),
+    ("mae", {"h": 12}),
+    ("mae", {"h": 18}),
+    ("mae", {"h": 24}),
+    ("crps", {"h": 6}),
+    ("crps", {"h": 12}),
+    ("cov90", {"h": 12}),
+    ("mae", {"target": "peak", "issue": "feb"}),
+    ("mae", {"target": "wy_end", "issue": "apr"}),
+    ("mae", {"target": "wy_end", "issue": "aug"}),
 )
+
+TARGET_PREFIX = {"peak": "peak", "wy_end": "wyend"}
+
+
+def label(metric: str, dims: dict) -> str:
+    """The display name of a metric at some dims, such as mae_h6 or peak_mae_feb."""
+    if "h" in dims:
+        return f"{metric}_h{int(dims['h'])}"
+    if "target" in dims and "issue" in dims:
+        return f"{TARGET_PREFIX.get(dims['target'], dims['target'])}_{metric}_{dims['issue']}"
+    return metric
+
+
+def parse_label(name: str) -> tuple[str, dict]:
+    """Turn a display name back into a metric and its dims.
+
+    Warning: this is the inverse of `label` and must stay so. It exists because the loop
+    documentation and the ledger name metrics this way.
+    """
+    for target, prefix in TARGET_PREFIX.items():
+        if name.startswith(f"{prefix}_"):
+            rest = name[len(prefix) + 1 :]
+            metric, _, issue = rest.rpartition("_")
+            return metric, {"target": target, "issue": issue}
+    metric, sep, lead = name.rpartition("_h")
+    if sep and lead.isdigit():
+        return metric, {"h": int(lead)}
+    return name, {}
+
+
+def metrics_frame(tracker: ExperimentTracker, experiment_id: int) -> pd.DataFrame:
+    """One row per run, one column per metric label.
+
+    A run that logged nothing still gets a row, because a model that failed at every cutoff
+    is a result worth seeing rather than one to drop.
+    """
+    runs = tracker.runs(experiment=experiment_id)
+    if not runs:
+        return pd.DataFrame()
+    rows = {
+        run["run_id"]: {"run_id": run["run_id"], "model": run["name"] or "unknown"} for run in runs
+    }
+    for row in tracker.metrics(experiment=experiment_id):
+        rows[row["run_id"]][label(row["metric"], row["dims"])] = row["value"]
+    return pd.DataFrame(list(rows.values()))
 
 
 def loop_columns(df: pd.DataFrame, metric: str) -> list[str]:
     """The identity columns, the ranking metric, and the metrics the loop compares."""
-    wanted = ["run_id", "model", metric, *LOOP_METRICS]
+    wanted = ["run_id", "model", metric, *(label(m, d) for m, d in LOOP_METRICS)]
     seen, out = set(), []
     for name in wanted:
         if name in df.columns and name not in seen:
@@ -43,59 +92,32 @@ def loop_columns(df: pd.DataFrame, metric: str) -> list[str]:
     return out
 
 
-def get_run_metrics(tracker: ExperimentTracker, run_id: int) -> dict | None:
-    try:
-        model = tracker.get_model(run_id)
-        metrics = tracker.get_metrics(run_id)
-        model_name = model["model_name"] if model else "Unknown"
-        return {"run_id": run_id, "model": model_name, **metrics}
-    except (ValueError, IndexError):
-        return None
-
-
-def create_metrics_summary(
-    tracker: ExperimentTracker, experiment_id: int, metric: str = DEFAULT_METRIC
-) -> pd.DataFrame | None:
-    """Every run in the experiment, ranked by `metric`.
-
-    Warning: a run can lack the metric, because a model that failed at every cutoff logs
-    none. Such a run goes to the end of the table instead of stopping the command.
-    """
-    runs = tracker.get_run_history(experiment_id)
-    metrics_list = [get_run_metrics(tracker, run["run_id"]) for run in runs]
-    metrics_list = [m for m in metrics_list if m is not None]
-
-    if not metrics_list:
-        return None
-
-    df = pd.DataFrame(metrics_list)
-    if metric not in df.columns:
-        return df
-    return df.sort_values(metric, na_position="last")
-
-
 def view_experiment(
     experiment_id: int,
     experiment_db: str = "forecast_experiments.db",
     metric: str = DEFAULT_METRIC,
     all_metrics: bool = False,
 ) -> pd.DataFrame | None:
-    tracker = ExperimentTracker(experiment_db)
-    experiment = tracker.get_experiment(experiment_id)
+    with ExperimentTracker(experiment_db) as tracker:
+        experiment = tracker.get_experiment(experiment_id)
+        if not experiment:
+            print(f"No experiment found with ID {experiment_id}")
+            return None
 
-    if not experiment:
-        print(f"No experiment found with ID {experiment_id}")
-        return None
+        print(f"Experiment: {experiment['name']}")
+        print(f"Description: {experiment['description']}")
+        print(f"Created at: {experiment['created_at']}")
+        if experiment["git_commit"]:
+            dirty = " (dirty tree)" if experiment["git_dirty"] else ""
+            print(f"Commit: {experiment['git_commit'][:12]}{dirty}")
 
-    print(f"Experiment: {experiment['experiment_name']}")
-    print(f"Description: {experiment['experiment_description']}")
-    print(f"Created at: {experiment['created_time']}")
+        metrics_df = metrics_frame(tracker, experiment_id)
 
-    metrics_df = create_metrics_summary(tracker, experiment_id, metric)
-    if metrics_df is None:
-        print("\nNo runs with metrics")
+    if metrics_df.empty:
+        print("\nNo runs")
         return None
     if metric in metrics_df.columns:
+        metrics_df = metrics_df.sort_values(metric, na_position="last")
         print(f"\nModels ranked by {metric}:")
     else:
         print(f"\nNo run logged {metric}; the table keeps the order of the runs:")

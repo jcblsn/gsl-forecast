@@ -7,6 +7,8 @@ outlooks issued January 1 through May 1 (the NRCS schedule), the water-year end 
 January 1 through August 1, since the summer decline is the product nobody else issues.
 """
 
+from collections.abc import Iterator
+
 import pandas as pd
 
 PEAK_MONTHS = (4, 5, 6)
@@ -81,13 +83,20 @@ def summarize_headline(scores: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def headline_metrics(summary: pd.DataFrame, model: str) -> dict[str, float]:
-    """Tracker metric names like peak_mae_apr and wyend_mae_jan."""
-    out = {}
+def headline_metrics(
+    summary: pd.DataFrame, model: str
+) -> Iterator[tuple[dict[str, float], dict[str, str]]]:
+    """One (values, dims) pair per headline scalar, ready for log_metrics.
+
+    The target and the issue month are dimensions of the same score. They used to be
+    written into the metric name, which put every scalar in its own column and made a
+    lead or an issue impossible to group over.
+    """
     for _, r in summary[summary["model"] == model].iterrows():
-        key = "peak" if r["target"] == "peak" else "wyend"
-        out[f"{key}_mae_{r['issue']}"] = float(r["mae"])
-    return out
+        yield (
+            {"mae": float(r["mae"]), "n": float(r["n"])},
+            {"target": str(r["target"]), "issue": str(r["issue"])},
+        )
 
 
 def print_headline(summary: pd.DataFrame) -> None:

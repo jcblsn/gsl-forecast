@@ -1,6 +1,7 @@
 """Run the CLI-level entry points against a synthetic DuckDB and a temp experiment db."""
 
 import json
+import os
 import subprocess
 import sys
 from datetime import date
@@ -59,12 +60,29 @@ def test_cv_all_cutoffs_writes_parquet_and_tracker(project):
 
     from experiment_tracker import ExperimentTracker
 
-    tracker = ExperimentTracker(str(project["tmp"] / "expt.db"))
-    exp = tracker.list_experiments()[0]
-    runs = tracker.get_run_history(exp["experiment_id"])
-    assert len(runs) == 2
-    metrics = tracker.get_metrics(runs[0]["run_id"])
-    assert {"mae_h1", "rmse_h6", "mae_ratio_h6"} <= set(metrics)
+    with ExperimentTracker(str(project["tmp"] / "expt.db")) as tracker:
+        exp = tracker.latest_experiment()
+        runs = tracker.runs(experiment=exp["experiment_id"])
+        assert len(runs) == 2
+        assert {r["name"] for r in runs} == {"naive_last", "naive_seasonal"}
+        assert all(r["status"] == "completed" for r in runs)
+
+        at_six = tracker.metrics(experiment=exp["experiment_id"], dims={"h": 6})
+        assert {"mae", "rmse", "mae_ratio"} <= {r["metric"] for r in at_six}
+
+        # The run records how it was produced, so an id resolves to a vintage.
+        assert exp["argv"] and exp["python"]
+        assert tracker.tags("experiment", exp["experiment_id"])["cutoff_policy"]
+
+        # The parquet is reachable from the run, so no path file is needed.
+        recorded = tracker.tags("experiment", exp["experiment_id"])["cv_parquet"]
+        assert os.path.basename(recorded) == parquets[0].name
+
+        # Every prediction row is addressable, and the stored metric follows from them.
+        rows = tracker.predictions(experiment=exp["experiment_id"], dims={"h": 6})
+        assert rows and all(r["dims"].keys() == {"cutoff", "h"} for r in rows)
+        checked = tracker.audit(runs[0]["run_id"], "mae", dims={"h": 6})
+        assert checked["agrees"], checked
 
 
 def test_cv_random_cutoffs_respects_n(project):
