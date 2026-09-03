@@ -20,26 +20,26 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --frozen
       - run: uv run --frozen gsl-pipeline
-      - run: uv run --frozen gsl-cv --no-plots
+      # --path-out names the file this run wrote. Selection by modification time can pick
+      # up a file from an earlier run, and a model missing from it has no interval.
+      - run: uv run --frozen gsl-cv --no-plots --path-out outputs/cv_path.txt
       - name: Forecast
         id: forecast
         continue-on-error: true
         run: |
-          cv=$(ls -t outputs/cv_results_*.parquet | head -1)
           uv run --frozen gsl-forecast --export forecasts/$(date -u +%Y-%m)-01.csv \
-            --intervals "$cv" --site-data-dir site/data
+            --intervals "$(cat outputs/cv_path.txt)" --site-data-dir site/data
       - name: Forecast with incomplete covariates
         if: steps.forecast.outcome == 'failure'
         run: |
-          cv=$(ls -t outputs/cv_results_*.parquet | head -1)
           uv run --frozen gsl-forecast --allow-incomplete \
-            --export forecasts/$(date -u +%Y-%m)-01.csv --intervals "$cv" \
-            --site-data-dir site/data
+            --export forecasts/$(date -u +%Y-%m)-01.csv \
+            --intervals "$(cat outputs/cv_path.txt)" --site-data-dir site/data
       - run: uv run --frozen gsl-verify
-      - name: Commit dated forecast
+      - name: Commit dated forecast and the results record
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add forecasts site/data
+          git add forecasts site/data data/results
           git diff --cached --quiet || git commit -m "Forecast issued $(date -u +%Y-%m-%d)"
           git push

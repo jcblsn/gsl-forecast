@@ -9,6 +9,7 @@ from src.forecasting.run_forecast import (
     explanation_payload,
     export_site_data,
     headline_calibration,
+    headline_or_none,
 )
 
 HEADLINE = "blend"
@@ -116,3 +117,19 @@ def test_calibration_refuses_a_curve_that_was_never_fitted():
     assert np.allclose(model.weights["melt"], default_weights(6))
     with pytest.raises(ValueError, match="refusing to publish a headline"):
         headline_calibration(model, 6)
+
+
+def test_a_refusal_suppresses_the_headline_and_not_the_issue():
+    """The refusal used to raise out of run_forecasts, after the predictions were stored,
+    and the workflow retry took the same path, so that month had no forecast at all."""
+    model, calibration = headline_or_none(_fitted_blend("melt", []), 6)
+    assert model is None and calibration is None
+
+
+def test_a_fitted_blend_still_carries_the_headline():
+    model, calibration = headline_or_none(_fitted_blend("melt", ["melt"]), 6)
+    assert model is not None and calibration["issue_season"] == "melt"
+
+
+def test_no_headline_model_is_not_a_refusal():
+    assert headline_or_none(None, 6) == (None, None)

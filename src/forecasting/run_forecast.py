@@ -181,13 +181,33 @@ def run_forecasts(
     headline = fitted.get(configured_headline) if headline_enabled else None
     if configured_headline and headline_enabled and headline is None:
         logging.error(f"Headline model {configured_headline} did not produce a forecast")
+    headline, calibration = headline_or_none(headline, horizon)
     combined.attrs["headline_model"] = headline.name if headline else None
-    combined.attrs["calibration"] = headline_calibration(headline, horizon) if headline else None
+    combined.attrs["calibration"] = calibration
     combined.attrs["contributions"] = (
         headline.contributions(horizon) if headline else pd.DataFrame()
     )
     logging.info(f"Stored {len(combined)} predictions under experiment {exp_id}")
     return combined
+
+
+def headline_or_none(
+    model: Forecaster | None, horizon: int
+) -> tuple[Forecaster | None, dict | None]:
+    """The headline model and its calibration, or 2 None values when the model refuses.
+
+    Warning: the refusal covers the headline number, not the issue. The model paths still go
+    out, and `export_site_data` keeps the last complete bundle on the public page. A refusal
+    that stopped the run left no forecast for that month, and the workflow retry took the
+    same path and stopped again.
+    """
+    if model is None:
+        return None, None
+    try:
+        return model, headline_calibration(model, horizon)
+    except ValueError as e:
+        logging.error(f"No headline this issue: {e}")
+        return None, None
 
 
 def headline_calibration(model: Forecaster, horizon: int) -> dict:
@@ -220,6 +240,25 @@ def headline_calibration(model: Forecaster, horizon: int) -> dict:
     }
 
 
+def require_intervals(out: pd.DataFrame, cv_parquet: str) -> None:
+    """Stop the export when a model has no interval.
+
+    Warning: `apply_intervals` gives NaN for a model that the cross-validation file does not
+    hold, and it raises nothing. The forecast is a range, not one number, so a missing
+    interval is not publishable. Re-run `gsl-cv` and pass the file it writes.
+    """
+    quantile_cols = [c for c in out.columns if c.startswith("q") and c[1:].isdigit()]
+    if not quantile_cols:
+        raise SystemExit(f"{cv_parquet} produced no quantile columns")
+    incomplete = out.groupby("model")[quantile_cols].apply(lambda g: g.isna().any().any())
+    missing = sorted(incomplete[incomplete].index)
+    if missing:
+        raise SystemExit(
+            f"No interval for {missing} in {cv_parquet}; re-run gsl-cv and use the file it "
+            "writes with --path-out"
+        )
+
+
 def export_forecasts(
     predictions: pd.DataFrame,
     path: str,
@@ -242,6 +281,7 @@ def export_forecasts(
         out = pd.concat(
             [apply_intervals(g, eq, m) for m, g in out.groupby("model")], ignore_index=True
         )
+        require_intervals(out, cv_parquet)
     out = out.sort_values(["model", "h"]).reset_index(drop=True)
     out["issue"] = out["issue"].dt.date
     out["month"] = out["month"].dt.date
