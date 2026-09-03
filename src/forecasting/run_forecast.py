@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -44,6 +45,31 @@ SITE_PROVENANCE_FIELDS = (
 )
 
 
+def table_fingerprint(df: pd.DataFrame) -> dict:
+    """A content address for the table the models read.
+
+    A maximum date says when the data stops. It does not say what the values were. USGS
+    revises provisional elevation and discharge, and NRCS revises SNOTEL, so 2 runs with the
+    same `data_max` can read different numbers. The digest covers every value in the table,
+    so a later reader can tell whether the table it holds is the table this issue used. The
+    column list travels with it, because a schema change also changes what was knowable.
+    """
+    ordered = df.sort_values("month").reset_index(drop=True)
+    payload = ordered.to_csv(index=False, float_format="%.6g").encode()
+    return {
+        "n_rows": int(len(ordered)),
+        "n_columns": int(len(ordered.columns)),
+        "columns": list(ordered.columns),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def config_fingerprint(config: dict) -> str:
+    """A digest of the resolved configuration, which carries the whole station roster."""
+    payload = json.dumps(config, sort_keys=True, default=str).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
 def code_provenance() -> dict:
     """The repository revision and dirty-tree state at issue time."""
     try:
@@ -77,6 +103,7 @@ def issue_metadata(config: dict, data_meta: dict) -> dict:
         "forecast_version": version,
         **code_provenance(),
         "evaluation_policy_version": policy["version"],
+        "config_sha256": config_fingerprint(config),
     }
 
 
@@ -98,7 +125,9 @@ def data_status(db_path: str) -> tuple[dict, list[str]]:
         "endpoint_7d_observation_count": _json_value(last.get("endpoint_7d_observation_count")),
         "provisional_observation_count": _json_value(last.get("provisional_observation_count")),
         "n_snotel_sites": None if pd.isna(n_sites) else int(n_sites),
+        "snotel_roster_version": last.get("snotel_roster_version"),
         "missing_covariates": missing,
+        "modeling_table": table_fingerprint(df),
     }
     problems = []
     if n_obs < MIN_OBS_DAYS:

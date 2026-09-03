@@ -111,3 +111,31 @@ def test_require_intervals_names_every_model_without_one():
     )
     with pytest.raises(SystemExit, match="\\['b', 'c'\\]"):
         require_intervals(out, "cv.parquet")
+
+
+def test_the_vintage_carries_a_content_address(tmp_path):
+    """A maximum date says when the data stops, not what the values were."""
+    from src.forecasting.run_forecast import table_fingerprint
+
+    df = pd.DataFrame(
+        {"month": pd.date_range("2020-01-01", periods=3, freq="MS"), "avg_elevation": [1.0, 2, 3]}
+    )
+    first = table_fingerprint(df)
+    assert first["n_rows"] == 3 and first["columns"] == ["month", "avg_elevation"]
+    assert first == table_fingerprint(df.iloc[::-1])
+
+    revised = df.copy()
+    revised.loc[0, "avg_elevation"] = 1.001
+    assert table_fingerprint(revised)["sha256"] != first["sha256"]
+
+    widened = df.assign(swe_eom_gsl=0.0)
+    assert table_fingerprint(widened)["sha256"] != first["sha256"]
+
+
+def test_the_config_digest_moves_when_the_roster_moves():
+    from src.forecasting.run_forecast import config_fingerprint
+
+    base = {"covariates": {"snotel": {"roster": {"stations": {"bear": ["1:UT:SNTL"]}}}}}
+    other = {"covariates": {"snotel": {"roster": {"stations": {"bear": ["2:UT:SNTL"]}}}}}
+    assert config_fingerprint(base) != config_fingerprint(other)
+    assert config_fingerprint(base) == config_fingerprint(dict(base))

@@ -65,7 +65,7 @@ The forecast and how it is scored:
 | MAE | Mean absolute error, in feet |
 | Mean pinball loss | The unweighted mean of pinball losses at q05, q25, q50, q75 and q95. Lower is better |
 | Coverage | The share of actual values inside the nominal central 90% interval |
-| Data vintage | The state of the input data on the issue date |
+| Data vintage | The state of the input data on the issue date. Each issue records the SHA-256 of the whole modeling table, its column list, the SHA-256 of the resolved configuration and the SNOTEL roster version, because a maximum date says when the data stops and not what the values were |
 | Headline model | The model that supplies the public number, named in `config/config.json` |
 | Production models | The subset written to dated files each month, in `src/forecasting/registry.py` |
 

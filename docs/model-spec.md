@@ -448,7 +448,10 @@ fully specified data-generating process, and they do not prove stationarity.
 
 1. The harness reads today's data. USGS revises provisional elevation and discharge. A
    forecast issued in 2013 did not have these values. The live record in `forecasts/` is the
-   only vintage-correct score.
+   only vintage-correct score. Each issue's `.meta.json` records the SHA-256 of the whole
+   modeling table and its column list, the SHA-256 of the resolved configuration, and the
+   SNOTEL roster version, so a later reader can tell whether the table it holds is the table
+   the issue used.
 2. Overlapping target months make long-lead interval scores slightly optimistic. See section
    7.
 
