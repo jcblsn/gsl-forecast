@@ -1,5 +1,7 @@
 # One line per experiment: date | model | change | peak_mae_feb | mae_h6 | crps_h6 | wyend_mae_apr | wyend_mae_aug | mae_h20 | keep
 # Harness: gsl-cv defaults (157 cutoffs 2011-08..2024-08, 24-month horizon, train from 1960). Baselines from the same run.
+# The committed record of the latest run is data/results/. Experiment ids name a local
+# scratchpad database that .gitignore excludes, so they are not a citation.
 2026-09-02 | swe_regression | baseline (swe_eom_gsl, prec_wy_eom_gsl) | 0.625 | 0.550 | 0.192 | 0.433 | 0.190 | 1.786 | -
 2026-09-02 | ets_damped_s12 | baseline | 0.869 | 0.824 | 0.256 | 0.936 | 0.297 | 1.742 | -
 2026-09-02 | inflow_chain | baseline | 0.580 | 0.669 | 0.175 | 0.734 | 0.193 | 2.035 | -

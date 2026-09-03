@@ -196,31 +196,32 @@ uv run --frozen gsl-plot [--history-years 10] [--output outputs/gsl_forecast.png
 
 Walk-forward cross-validation: 157 month-end cutoffs from August 2011 to August 2024,
 24-month horizon, training from 1960, data through August 2026. Every number below comes
-from one run, experiment 11 in `forecast_experiments.db`. MAE is in feet. The ratio is
-`blend` MAE divided by `naive_last` MAE at the same lead, so below 1.00 beats a repeat of
-the last value.
+from one run, `GSL_CV_20260903_0004`, and `data/results/` holds that run. MAE is in feet.
+The ratio is `blend` MAE divided by `naive_last` MAE at the same lead, so below 1.00 beats
+a repeat of the last value. `gsl-results --tables` prints these 3 tables from those files,
+so a published number and the run behind it cannot drift apart.
 
 | Lead | blend | swe_head | swe_regression | blend_swe | inflow_chain | ets_damped_s12 | naive_last | Ratio (blend) |
-|---|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 0.13 | 0.13 | 0.12 | 0.12 | 0.15 | 0.14 | 0.34 | 0.38 |
 | 3 | 0.32 | 0.32 | 0.31 | 0.31 | 0.37 | 0.45 | 0.90 | 0.35 |
-| 6 | 0.52 | 0.51 | 0.54 | 0.57 | 0.68 | 0.82 | 1.33 | 0.39 |
-| 9 | 0.77 | 0.76 | 0.79 | 0.82 | 0.98 | 1.08 | 1.26 | 0.61 |
-| 12 | 1.07 | 1.06 | 1.07 | 1.07 | 1.32 | 1.24 | 1.28 | 0.83 |
-| 18 | 1.61 | 1.72 | 1.56 | 1.54 | 1.86 | 1.65 | 1.91 | 0.84 |
+| 6 | 0.52 | 0.51 | 0.55 | 0.57 | 0.68 | 0.82 | 1.33 | 0.39 |
+| 9 | 0.77 | 0.76 | 0.79 | 0.82 | 0.98 | 1.08 | 1.26 | 0.62 |
+| 12 | 1.07 | 1.07 | 1.07 | 1.07 | 1.32 | 1.25 | 1.28 | 0.83 |
+| 18 | 1.61 | 1.72 | 1.56 | 1.53 | 1.86 | 1.65 | 1.91 | 0.85 |
 | 24 | 2.00 | 2.32 | 1.95 | 1.86 | 2.31 | 1.92 | 1.79 | 1.11 |
 
 CRPS and 90% coverage. CRPS scores the whole range, and coverage should be 0.90:
 
-| Lead | blend | swe_head | swe_regression | inflow_chain | ets_damped_s12 | naive_last |
-|---|---|---|---|---|---|---|
-| 6 | 0.19 / 0.88 | 0.18 / 0.88 | 0.19 / 0.89 | 0.18 / 0.87 | 0.26 / 0.89 | 0.40 / 0.89 |
-| 12 | 0.35 / 0.89 | 0.35 / 0.89 | 0.36 / 0.89 | 0.32 / 0.89 | 0.38 / 0.88 | 0.38 / 0.87 |
+| Lead | blend | swe_head | swe_regression | blend_swe | inflow_chain | ets_damped_s12 | naive_last |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 6 | 0.19 / 0.88 | 0.18 / 0.88 | 0.19 / 0.89 | 0.19 / 0.89 | 0.18 / 0.87 | 0.26 / 0.89 | 0.40 / 0.89 |
+| 12 | 0.35 / 0.89 | 0.35 / 0.89 | 0.36 / 0.89 | 0.35 / 0.88 | 0.32 / 0.89 | 0.38 / 0.88 | 0.38 / 0.87 |
 
 The 2 headline numbers, by the date the forecast goes out (MAE, ft):
 
 | Target | Issue | blend | swe_head | swe_regression | blend_swe | inflow_chain | ets_damped_s12 | naive_last |
-|---|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Spring peak | Jan 1 | 0.71 | 0.70 | 0.85 | 0.87 | 0.84 | 1.01 | 1.62 |
 | Spring peak | Feb 1 | 0.57 | 0.56 | 0.61 | 0.63 | 0.62 | 0.87 | 1.39 |
 | Spring peak | Mar 1 | 0.43 | 0.42 | 0.44 | 0.46 | 0.42 | 0.70 | 1.03 |
@@ -246,7 +247,7 @@ against 1.86 ft for the best model. The 24-month path is therefore honest about 
 limit rather than useful at the far end.
 
 `inflow_chain_area`, which puts lake area from the hypsometry table in place of the level,
-scores within 0.02 ft of `inflow_chain` at every lead, so the hypsometry does not yet help.
+scores within 0.04 ft of `inflow_chain` at every lead, so the hypsometry does not yet help.
 
 The 90% interval covers 0.87 to 0.89 of the actual values at leads 6 and 12, against a
 nominal 0.90. Section 7 of `docs/model-spec.md` explains why the long-lead figure is

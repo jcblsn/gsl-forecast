@@ -274,10 +274,14 @@ Two caveats apply to every number this harness produces.
 
 ## 9 Current accuracy
 
-Every published number comes from one cross-validation run: experiment 11 in
-`forecast_experiments.db`, 157 cutoffs from 2011-08 to 2024-08, data through 2026-08. The
-README section "Current results" holds the tables. `docs/autoresearch.log` records which
+Every published number comes from one cross-validation run, `GSL_CV_20260903_0004`: 157
+cutoffs from 2011-08 to 2024-08, data through 2026-08. `data/results/` holds that run, and
+the repository keeps those files. The README section "Current results" holds the tables, and
+`gsl-results --tables` prints them from the files. `docs/autoresearch.log` records which
 change produced which number.
+
+The experiment tracker database is a scratchpad for a run in progress. `.gitignore` excludes
+it, so it cannot be the citation for a published number.
 
 In short:
 
