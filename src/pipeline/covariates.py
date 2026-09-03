@@ -28,6 +28,9 @@ DISCHARGE_PARAMETER = "00060"
 ELEVATION_PARAMETER = "62614"
 NORTH_ARM_TABLE = "usgs_north_arm_elevation_daily"
 SNOTEL_ELEMENTS = ("WTEQ", "PREC", "SMS:-8")
+# The month-end snow input is the last valid value in the final days of the month, not the
+# value on the last day. A site that misses the last day still reports a month-end value.
+MONTH_END_WINDOW_DAYS = 5
 SNOTEL_COLUMNS = (
     "wteq_in",
     "prec_in",
@@ -367,17 +370,25 @@ UNAVAILABLE_AT_ISSUE = ("tavg_f_gsl", "prcp_in_gsl")
 def transform_covariates(
     conn: duckdb.DuckDBPyConnection, discharge: dict, basins: list[str]
 ) -> None:
-    """Monthly, complete months only. Snowpack at month end per basin and pooled: mean SWE
-    and precipitation, both as percent of the site medians (so the growing site roster does
-    not drift the index), and 8-inch soil moisture. Reservoir storage at month end summed
-    over the reporting stations per basin (the roster grows with dam construction, so early
-    sums are smaller for a physical reason). Inflow and breach flow in kaf, north-arm mean
-    elevation, the south-minus-north head, and climate-division mean temperature and
-    precipitation. NOAA releases a climate month around the 8th of the next month, so the
-    cutoff month has no climate value at issue time. Therefore this table holds only the
-    `_lag1` copies of the climate columns. The unlagged values stay in `climdiv_monthly`,
-    where no model reads them, so a model cannot use a value that does not exist at issue
-    time."""
+    """Monthly, complete months only.
+
+    Snowpack comes from the sites in `snotel_roster`. A site's month-end value is its last
+    valid value in the final `MONTH_END_WINDOW_DAYS` days of the month, so a site that
+    misses the last day still reports. Each variable takes its own last valid day and its
+    own count of reporting sites. The columns are mean SWE, mean water-year precipitation,
+    both also as percent of the site medians, and 8-inch soil moisture, per basin and
+    pooled. Every pooled column averages the basins under the roster's declared basin
+    weights.
+
+    Reservoir storage at month end is summed over the reporting stations per basin. That
+    roster grows with dam construction, so early sums are smaller for a physical reason.
+
+    The table also holds inflow and breach flow in kaf, north-arm mean elevation, the
+    south-minus-north head, and climate-division mean temperature and precipitation. NOAA
+    releases a climate month around the 8th of the next month, so the cutoff month has no
+    climate value at issue time. Therefore this table holds only the `_lag1` copies of the
+    climate columns. The unlagged values stay in `climdiv_monthly`, where no model reads
+    them, so a model cannot use a value that does not exist at issue time."""
     inflow = discharge["inflow"]
     exchange = discharge.get("exchange", {})
     flow_cols = ",\n".join(
@@ -394,8 +405,8 @@ def transform_covariates(
     per_basin = {
         "swe_eom": "swe",
         "prec_wy_eom": "prec",
-        "swe_pct_median": "100 * swe_sum / NULLIF(swe_med, 0)",
-        "prec_pct_median": "100 * prec_sum / NULLIF(prec_med, 0)",
+        "swe_pct_median": "swe_pct",
+        "prec_pct_median": "prec_pct",
         "sms_eom": "sms",
     }
     basin_cols = ",\n".join(
@@ -403,34 +414,56 @@ def transform_covariates(
         for name, expr in per_basin.items()
         for b in basins
     )
+    # Every pooled column is the basin average under the roster's declared basin weights,
+    # over the basins that report that column that month. Weighting by the site count
+    # instead would let the basin with the most sites decide the index, and would apply the
+    # count of reporting SWE sites to the precipitation and soil-moisture averages as well.
+    pooled_cols = ",\n".join(
+        f"SUM({expr} * w) FILTER ({expr} IS NOT NULL)"
+        f" / NULLIF(SUM(w) FILTER ({expr} IS NOT NULL), 0) AS {name}_gsl"
+        for name, expr in per_basin.items()
+    )
     res_cols = ",\n".join(
         f"MAX(CASE WHEN basin = '{b}' THEN kaf END) AS res_kaf_{b}" for b in basins
     )
     conn.execute(f"""
         CREATE OR REPLACE TABLE monthly_covariates AS
-        WITH eom AS (
-            SELECT s.basin, s.roster_version, DATE_TRUNC('month', d.d) AS month, d.*
+        WITH window_days AS (
+            SELECT s.basin, s.basin_weight, s.roster_version,
+                   DATE_TRUNC('month', d.d) AS month, d.*
             FROM snotel_daily d JOIN snotel_roster s USING (station_triplet)
-            WHERE d.d = LAST_DAY(d.d) AND d.wteq_in IS NOT NULL
+            WHERE d.d > LAST_DAY(d.d) - INTERVAL {MONTH_END_WINDOW_DAYS} DAY
+        ),
+        eom AS (
+            SELECT month, station_triplet, basin, basin_weight, roster_version,
+                   ARG_MAX(wteq_in, d) AS wteq_in,
+                   ARG_MAX(wteq_median_in, d) AS wteq_median_in,
+                   ARG_MAX(prec_in, d) AS prec_in,
+                   ARG_MAX(prec_median_in, d) AS prec_median_in,
+                   ARG_MAX(sms_8_pct, d) AS sms_8_pct
+            FROM window_days GROUP BY ALL
         ),
         snow AS (
-            SELECT month, basin, roster_version, COUNT(*) AS n,
+            SELECT month, basin, roster_version, ANY_VALUE(basin_weight) AS w,
+                   COUNT(wteq_in) AS n_swe,
+                   COUNT(prec_in) AS n_prec,
+                   COUNT(sms_8_pct) AS n_sms,
                    AVG(wteq_in) AS swe, AVG(prec_in) AS prec, AVG(sms_8_pct) AS sms,
-                   SUM(wteq_in) FILTER (wteq_median_in IS NOT NULL) AS swe_sum,
-                   SUM(wteq_median_in) AS swe_med,
-                   SUM(prec_in) FILTER (prec_median_in IS NOT NULL) AS prec_sum,
-                   SUM(prec_median_in) AS prec_med
+                   100 * SUM(wteq_in) FILTER (wteq_median_in IS NOT NULL)
+                       / NULLIF(SUM(wteq_median_in) FILTER (wteq_in IS NOT NULL), 0)
+                       AS swe_pct,
+                   100 * SUM(prec_in) FILTER (prec_median_in IS NOT NULL)
+                       / NULLIF(SUM(prec_median_in) FILTER (prec_in IS NOT NULL), 0)
+                       AS prec_pct
             FROM eom GROUP BY ALL
         ),
         snow_wide AS (
             SELECT month,
                    {basin_cols},
-                   SUM(swe * n) / SUM(n) AS swe_eom_gsl,
-                   SUM(prec * n) / SUM(n) AS prec_wy_eom_gsl,
-                   100 * SUM(swe_sum) / NULLIF(SUM(swe_med), 0) AS swe_pct_median_gsl,
-                   100 * SUM(prec_sum) / NULLIF(SUM(prec_med), 0) AS prec_pct_median_gsl,
-                   SUM(sms * n) / SUM(n) AS sms_eom_gsl,
-                   SUM(n) AS n_snotel_sites,
+                   {pooled_cols},
+                   SUM(n_swe) AS n_snotel_sites,
+                   SUM(n_prec) AS n_snotel_prec,
+                   SUM(n_sms) AS n_snotel_sms,
                    ANY_VALUE(roster_version) AS snotel_roster_version
             FROM snow GROUP BY month
         ),

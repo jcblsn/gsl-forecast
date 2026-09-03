@@ -81,6 +81,13 @@ one. A fixed roster removes both effects. It also removes the drift of a raw mea
 count that grows from 18 sites in 1979 to 55 sites in 2026. The pipeline still ingests every
 discovered site, so a later roster version can use a site this one leaves out.
 
+A site's month-end value is its last valid value in the last 5 days of the month, not its
+value on the last day. Exact last-day matching dropped a site whose last day was missing even
+when the day before was present. Each variable takes its own last valid day and its own count
+of reporting sites, so the count of reporting SWE sites no longer weights the precipitation
+and soil-moisture averages. Every pooled (`_gsl`) column averages the basins under the
+roster's declared basin weights.
+
 The reservoir roster is still discovered. It grows as dams are built, so early storage sums
 are smaller for a physical reason.
 

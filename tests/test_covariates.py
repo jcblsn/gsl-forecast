@@ -346,3 +346,69 @@ def test_roster_rejects_weights_that_do_not_sum_to_one(monkeypatch):
     with duckdb.connect(":memory:") as conn:
         with pytest.raises(ValueError, match="sum to 1"):
             cov.ingest_snotel(conn, cfg["snotel"])
+
+
+def snow_only_db(daily_rows, roster_rows):
+    """A database with hand-written snow rows, so one aggregation rule can be checked."""
+    conn = duckdb.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE snotel_daily (station_triplet VARCHAR, d DATE, wteq_in FLOAT, "
+        "prec_in FLOAT, sms_8_pct FLOAT, wteq_median_in FLOAT, prec_median_in FLOAT)"
+    )
+    conn.executemany("INSERT INTO snotel_daily VALUES (?, ?, ?, ?, ?, ?, ?)", daily_rows)
+    conn.execute(
+        "CREATE TABLE snotel_roster (roster_version VARCHAR, station_triplet VARCHAR, "
+        "basin VARCHAR, basin_weight DOUBLE)"
+    )
+    conn.executemany("INSERT INTO snotel_roster VALUES (?, ?, ?, ?)", roster_rows)
+    conn.execute("CREATE TABLE usgs_discharge_daily (site_id VARCHAR, d DATE, discharge_cfs FLOAT)")
+    conn.execute(
+        "CREATE TABLE reservoir_monthly (station_triplet VARCHAR, month DATE, storage_kaf FLOAT)"
+    )
+    conn.execute("CREATE TABLE reservoir_sites (station_triplet VARCHAR, basin VARCHAR)")
+    conn.execute(f"CREATE TABLE {cov.NORTH_ARM_TABLE} (d DATE, elevation DOUBLE)")
+    conn.execute(
+        "CREATE TABLE climdiv_monthly (month DATE, division VARCHAR, tavg_f DOUBLE, prcp_in DOUBLE)"
+    )
+    conn.execute("CREATE TABLE monthly_elevation (month DATE, avg_elevation DOUBLE)")
+    return conn
+
+
+def test_month_end_takes_the_last_valid_day_in_the_window():
+    """A site that misses the last day of the month still reports a month-end value."""
+    rows = [
+        ("1:UT:SNTL", "2020-01-29", 4.0, None, None, 10.0, None),
+        ("1:UT:SNTL", "2020-01-30", 5.0, None, None, 10.0, None),
+        ("2:UT:SNTL", "2020-01-31", 7.0, None, None, 10.0, None),
+    ]
+    with snow_only_db(rows, [("v", "1:UT:SNTL", "bear", 1.0)]) as conn:
+        cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear"])
+        row = conn.execute("SELECT swe_eom_bear, n_snotel_sites FROM monthly_covariates").fetchone()
+    assert row == (pytest.approx(5.0), 1)
+
+
+def test_pooled_columns_use_the_declared_basin_weights():
+    """Weber has 1 site and Bear has 3, but the weights and not the counts set the index."""
+    rows = [("b1", "2020-01-31", 3.0, None, None, None, None)]
+    rows += [(f"a{i}", "2020-01-31", 9.0, None, None, None, None) for i in range(3)]
+    roster = [("v", "b1", "weber", 0.25)] + [("v", f"a{i}", "bear", 0.75) for i in range(3)]
+    with snow_only_db(rows, roster) as conn:
+        cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear", "weber"])
+        row = conn.execute("SELECT swe_eom_gsl, n_snotel_sites FROM monthly_covariates").fetchone()
+    assert row == (pytest.approx(0.75 * 9.0 + 0.25 * 3.0), 4)
+
+
+def test_each_variable_counts_its_own_reporting_sites():
+    """Soil moisture came from 1 site per basin; the SWE count must not weight its average."""
+    rows = [
+        ("a", "2020-01-31", 9.0, None, 40.0, None, None),
+        ("b", "2020-01-31", 9.0, None, None, None, None),
+        ("c", "2020-01-31", 3.0, None, 20.0, None, None),
+    ]
+    roster = [("v", "a", "bear", 0.5), ("v", "b", "bear", 0.5), ("v", "c", "weber", 0.5)]
+    with snow_only_db(rows, roster) as conn:
+        cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear", "weber"])
+        row = conn.execute(
+            "SELECT sms_eom_gsl, n_snotel_sites, n_snotel_sms FROM monthly_covariates"
+        ).fetchone()
+    assert row == (pytest.approx(30.0), 3, 2)
