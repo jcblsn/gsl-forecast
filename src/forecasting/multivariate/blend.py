@@ -6,10 +6,12 @@ and 1 - w(h) on `ets_damped_s12`. It fits w(h) by a walk-forward pass inside the
 data, then forces the weights to fall with the lead, so the blend hands over to the
 univariate model as the snowpack signal expires.
 
-The inner pass uses 30 years of cutoffs, not the 15 years the outer harness uses. The 24
-weights come from overlapping 24-month windows, so 15 years leaves about 7 independent
-blocks at the longest lead. That is too few. On 15 years the fitted weight stays near 1 out
-to lead 13, which contradicts what snowpack can carry. On 30 years it falls from lead 9.
+The inner pass uses the same 15-year cutoff window as the outer harness. A wider window
+gives less noisy weights but a biased answer: before about 1995 the SNOTEL record was too
+short to fit the snowpack model on, so the inner pass sees it fail for a reason that no
+longer applies and gives it half the weight it earns. On 30 years the fitted weight at lead
+6 is 0.60, against an outer error of 0.51 ft for the snowpack model and 0.82 ft for the
+univariate one.
 """
 
 from datetime import date
@@ -91,7 +93,7 @@ class BlendForecaster(Forecaster):
     def __init__(
         self,
         horizon: int = 24,
-        history_years: int = 30,
+        history_years: int = 15,
         max_cutoffs: int | None = None,
         min_cutoffs: int = 24,
         name: str = "blend",

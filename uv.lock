@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-08-27T00:27:41Z"
+exclude-newer = "2026-08-27T00:36:52Z"
 
 [[package]]
 name = "appnope"
