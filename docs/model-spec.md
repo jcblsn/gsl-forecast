@@ -136,8 +136,12 @@ Four properties follow from this design.
 - The model fits each lead directly. It does not iterate a 1-step model, so it does not
   accumulate 1-step error. The 24 leads are separate fits, so the forecast path carries no
   smoothness constraint and the leads can disagree.
-- Each fit uses 1 row per year. The rows inside one fit do not overlap in time. So the fit
-  does not need an autocorrelation correction.
+- Each fit uses 1 row per year. The rows do not overlap in time when `h` is 12 or less. Past
+  12 months 2 adjacent origin-to-target windows share months, so the rows do overlap. Lake
+  endpoints are also serially dependent even when the windows do not overlap. This affects
+  the uncertainty and the stability of the penalty search, not the mechanical validity of
+  the point prediction, and it is why a reported difference needs the block bootstrap of
+  section 8.1.
 - The fit is per calendar month, so the model needs no seasonal term.
 - The `b1 * y_i` term is a mean-reversion term. It sets how far the lake returns toward its
   own level over `h` months.

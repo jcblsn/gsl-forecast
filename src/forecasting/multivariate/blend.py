@@ -124,12 +124,36 @@ def monotone_weight_path(loss: np.ndarray, share: np.ndarray) -> np.ndarray:
     return selected
 
 
-def _fingerprint(train: pd.DataFrame) -> tuple:
-    y = train[TARGET_COL].to_numpy(dtype=float)
-    return (len(y), round(float(y[0]), 6), round(float(y[-1]), 6), round(float(np.nansum(y)), 4))
+def _column_summary(train: pd.DataFrame, column: str) -> tuple:
+    """A cheap summary of 1 column: its ends, its sum and its count of missing values."""
+    if column not in train.columns:
+        return (column, None)
+    values = train[column].to_numpy(dtype=float)
+    if not len(values):
+        return (column, 0)
+    return (
+        column,
+        round(float(values[0]), 6),
+        round(float(values[-1]), 6),
+        round(float(np.nansum(values)), 4),
+        int(np.isnan(values).sum()),
+    )
 
 
-def _cached_prediction(label: str, factory, train: pd.DataFrame, horizon: int) -> np.ndarray:
+def _fingerprint(train: pd.DataFrame, columns: tuple[str, ...]) -> tuple:
+    """A summary of every column 1 component reads, including its covariates.
+
+    The summary covered the target column alone. A component that reads snowpack could
+    therefore take a cached prediction from a frame whose snowpack differed, as long as the
+    elevation series matched. That cannot happen inside 1 walk, but it can across a pipeline
+    change in 1 process, and the cache is a module-level dictionary.
+    """
+    return (len(train), tuple(_column_summary(train, c) for c in columns))
+
+
+def _cached_prediction(
+    label: str, factory, train: pd.DataFrame, horizon: int, columns: tuple[str, ...]
+) -> np.ndarray:
     """The prediction of one component at one inner cutoff, kept in a cache.
 
     Cross-validation calls `fit` one time for each outer cutoff. Two adjacent outer cutoffs
@@ -139,7 +163,7 @@ def _cached_prediction(label: str, factory, train: pd.DataFrame, horizon: int) -
     The label identifies the component, and it carries the component's settings, so 2
     components with the same name and different features cannot share an entry.
     """
-    key = (label, train[TIME_COL].iloc[-1], horizon, _fingerprint(train))
+    key = (label, train[TIME_COL].iloc[-1], horizon, _fingerprint(train, columns))
     hit = _CACHE.get(key)
     if hit is None:
         hit = factory().fit(train).predict(horizon)["pred"].to_numpy(dtype=float)
@@ -186,6 +210,9 @@ class BlendForecaster(Forecaster):
         self.n_weight_cutoffs = 0
         self._fitted: list[Forecaster] = []
         self._labels = [_settings_label(label, f) for label, f in self._factories]
+        self._fingerprint_columns = [
+            (TARGET_COL, *sorted(f().feature_columns())) for _, f in self._factories
+        ]
 
     def component_factories(self) -> list[tuple[str, object]]:
         """The 2 models that this model mixes. The registry also holds each one separately.
@@ -225,8 +252,10 @@ class BlendForecaster(Forecaster):
             train = data[data[TIME_COL] <= cutoff]
             months = [cutoff + relativedelta(months=i) for i in range(1, self.horizon + 1)]
             rows = [
-                _cached_prediction(label, factory, train, self.horizon)
-                for label, (_, factory) in zip(self._labels, self._factories, strict=True)
+                _cached_prediction(label, factory, train, self.horizon, columns)
+                for label, (_, factory), columns in zip(
+                    self._labels, self._factories, self._fingerprint_columns, strict=True
+                )
             ]
             actuals.append(observed.reindex(months).to_numpy(dtype=float))
             predictions.append(np.stack(rows))

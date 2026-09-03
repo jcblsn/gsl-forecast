@@ -314,3 +314,24 @@ def test_blends_with_different_components_do_not_share_the_cache(synthetic):
     _blend(snow_features=["swe_eom_gsl", "prec_wy_eom_gsl"], snow_name="swe_regression").fit(train)
     labels = {key[0].split("|")[0] for key in blend_cache}
     assert labels == {"swe_head", "swe_regression", "ets_damped_s12"}
+
+
+def test_a_changed_covariate_does_not_take_a_cached_prediction(synthetic):
+    """The memo summarised the elevation column alone, so a snowpack change was invisible.
+
+    The anchor reads the lake record only, so its entries must survive the same change.
+    """
+    train = synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")].copy()
+    blend_cache.clear()
+    _blend().fit(train)
+    before = set(blend_cache)
+    shifted = train.copy()
+    shifted.loc[shifted.index[0], "swe_eom_gsl"] += 5.0
+    _blend().fit(shifted)
+
+    def component(keys, name):
+        return {key for key in keys if key[0].startswith(name)}
+
+    added = set(blend_cache) - before
+    assert component(added, "swe_head")
+    assert not component(added, "ets_damped_s12")
