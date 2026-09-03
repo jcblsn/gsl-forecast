@@ -283,3 +283,66 @@ def test_breach_and_north_arm_columns(db):
 def test_basin_for_huc():
     assert cov.basin_for_huc("160102", CFG["snotel"]["basins"]) == "bear"
     assert cov.basin_for_huc("170101", CFG["snotel"]["basins"]) is None
+
+
+ROSTER = {
+    "version": "test-roster-v1",
+    "basin_weights": {"bear": 0.7, "provo_jordan": 0.3},
+    "stations": {"bear": ["1:UT:SNTL"], "provo_jordan": ["2:UT:SNTL"]},
+}
+
+
+def roster_cfg(**overrides):
+    snotel = {**CFG["snotel"], "roster": {**ROSTER, **overrides}}
+    return {**CFG, "snotel": snotel}
+
+
+def test_roster_defaults_to_the_sites_discovered_today(db):
+    rows = db.execute("SELECT * FROM snotel_roster ORDER BY station_triplet").fetchall()
+    assert [r[:3] for r in rows] == [
+        ("discovered-active", "1:UT:SNTL", "bear"),
+        ("discovered-active", "2:UT:SNTL", "provo_jordan"),
+    ]
+    assert [r[3] for r in rows] == [pytest.approx(0.5), pytest.approx(0.5)]
+
+
+def test_configured_roster_names_its_version_and_weights(monkeypatch):
+    monkeypatch.setattr(usgs.requests, "get", fake_get)
+    with duckdb.connect(":memory:") as conn:
+        cov.ingest_snotel(conn, roster_cfg()["snotel"])
+        rows = conn.execute("SELECT * FROM snotel_roster ORDER BY station_triplet").fetchall()
+    assert rows == [
+        ("test-roster-v1", "1:UT:SNTL", "bear", pytest.approx(0.7)),
+        ("test-roster-v1", "2:UT:SNTL", "provo_jordan", pytest.approx(0.3)),
+    ]
+
+
+def test_features_ignore_a_site_the_roster_left_out(monkeypatch):
+    """A site an earlier run left in snotel_sites must not reach monthly_covariates."""
+    monkeypatch.setattr(usgs.requests, "get", fake_get)
+    cfg = roster_cfg(stations={"bear": ["1:UT:SNTL"]}, basin_weights={"bear": 1.0})
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE monthly_elevation (month DATE, avg_elevation DOUBLE)")
+        conn.execute("INSERT INTO monthly_elevation VALUES ('2020-01-01', 4192.0)")
+        cov.run_covariates(conn, {"covariates": cfg})
+        row = conn.execute(
+            "SELECT n_snotel_sites, swe_eom_provo_jordan, snotel_roster_version "
+            "FROM monthly_covariates WHERE month = DATE '2020-01-01'"
+        ).fetchone()
+    assert row == (1, None, "test-roster-v1")
+
+
+def test_roster_rejects_a_station_awdb_does_not_return(monkeypatch):
+    monkeypatch.setattr(usgs.requests, "get", fake_get)
+    cfg = roster_cfg(stations={**ROSTER["stations"], "bear": ["1:UT:SNTL", "99:UT:SNTL"]})
+    with duckdb.connect(":memory:") as conn:
+        with pytest.raises(ValueError, match="99:UT:SNTL"):
+            cov.ingest_snotel(conn, cfg["snotel"])
+
+
+def test_roster_rejects_weights_that_do_not_sum_to_one(monkeypatch):
+    monkeypatch.setattr(usgs.requests, "get", fake_get)
+    cfg = roster_cfg(basin_weights={"bear": 0.7, "provo_jordan": 0.7})
+    with duckdb.connect(":memory:") as conn:
+        with pytest.raises(ValueError, match="sum to 1"):
+            cov.ingest_snotel(conn, cfg["snotel"])

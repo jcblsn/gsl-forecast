@@ -66,9 +66,23 @@ Three availability rules control which model may use which column.
 3. The published NRCS inflow forecast exists for January to May of 2024, 2025 and 2026. That
    is 15 publication dates. This is too few to fit a coefficient on.
 
-Two roster effects change the meaning of a raw mean over time. The SNOTEL roster grows from
-18 sites in 1979 to 55 sites in 2026, so a raw basin mean drifts. The reservoir roster grows
-as dams are built, so early storage sums are smaller for a physical reason.
+### 2.0.1 The SNOTEL roster
+
+The snow features come from a versioned roster, not from the sites AWDB reports as active on
+the day of the run. `config/config.json` names the roster under `covariates.snotel.roster`.
+The roster in use is `gsl-modern-complete-v1`: the 29 sites with a month-end SWE value in
+every month from 1989-10 to 2026-08. `snotel_roster` holds one row per site with the roster
+version, the basin and the basin weight, and `monthly_covariates` carries the version in
+`snotel_roster_version`.
+
+A discovered roster changes with the AWDB active flag and with the sites an earlier run left
+in `snotel_sites`, so the same code gave different features on a fresh database and on an old
+one. A fixed roster removes both effects. It also removes the drift of a raw mean over a site
+count that grows from 18 sites in 1979 to 55 sites in 2026. The pipeline still ingests every
+discovered site, so a later roster version can use a site this one leaves out.
+
+The reservoir roster is still discovered. It grows as dams are built, so early storage sums
+are smaller for a physical reason.
 
 ## 2.1 The endpoint seasonal baseline
 

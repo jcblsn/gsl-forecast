@@ -11,6 +11,7 @@ import logging
 from datetime import date, timedelta
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 from src.pipeline.climate import ingest_climdiv
@@ -44,12 +45,28 @@ def basin_for_huc(huc: str, basins: dict[str, str]) -> str | None:
 
 
 def fetch_awdb_stations(
-    states: list[str], network: str, basins: dict[str, str], elements: str | None = None
+    states: list[str],
+    network: str,
+    basins: dict[str, str],
+    elements: str | None = None,
+    station_triplets: list[str] | None = None,
 ) -> list[dict]:
-    """Active AWDB stations of one network (SNTL, BOR) inside the configured hydrologic units."""
+    """AWDB stations of one network inside the configured hydrologic units.
+
+    A list of station triplets asks AWDB for those stations, active or retired. Without
+    that list the function asks for the stations that are active on the day of the run.
+    """
     sites = []
-    for state in states:
-        params = {"stationTriplets": f"*:{state}:{network}", "activeOnly": "true"}
+    queries = (
+        [",".join(station_triplets)]
+        if station_triplets
+        else [f"*:{state}:{network}" for state in states]
+    )
+    for query in queries:
+        params = {
+            "stationTriplets": query,
+            "activeOnly": "false" if station_triplets else "true",
+        }
         if elements:
             params["elements"] = elements
         resp = get_with_retry(f"{AWDB}/stations", params=params, timeout=120)
@@ -69,6 +86,67 @@ def fetch_awdb_stations(
                     }
                 )
     return sites
+
+
+def roster_stations(cfg: dict) -> list[str]:
+    """The station triplets the configured roster names, or an empty list."""
+    configured = cfg.get("roster")
+    if not configured:
+        return []
+    return [t for stations in configured["stations"].values() for t in stations]
+
+
+def create_snotel_roster(conn: duckdb.DuckDBPyConnection, sites: list[dict], cfg: dict) -> None:
+    """Write `snotel_roster`: the versioned set of sites the snow features use.
+
+    A roster in the configuration names the sites and the basin weight of each basin.
+    The roster makes the features independent of which sites AWDB reports as active on
+    the day of the run, and of which sites an earlier run left in `snotel_sites`.
+
+    Without a configured roster the function falls back to the sites discovered today and
+    gives each basin the same weight. That fallback is not stable over time. Use it for a
+    first run or a test only.
+    """
+    found = {site["station_triplet"]: site["basin"] for site in sites}
+    configured = cfg.get("roster")
+    if configured:
+        version = configured["version"]
+        station_basins = {
+            triplet: basin
+            for basin, triplets in configured["stations"].items()
+            for triplet in triplets
+        }
+        missing = sorted(set(station_basins) - set(found))
+        if missing:
+            raise ValueError(f"AWDB did not return these roster stations: {missing}")
+        crossed = sorted(t for t, b in station_basins.items() if found[t] != b)
+        if crossed:
+            raise ValueError(f"These roster stations sit in another basin than declared: {crossed}")
+        basin_weights = configured["basin_weights"]
+    else:
+        version = "discovered-active"
+        station_basins = found
+        basins = sorted(set(found.values()))
+        basin_weights = {basin: 1.0 / len(basins) for basin in basins}
+    if set(basin_weights) != set(station_basins.values()):
+        raise ValueError("The basin weights must name exactly the basins the roster covers")
+    if not np.isclose(sum(basin_weights.values()), 1.0):
+        raise ValueError("The basin weights must sum to 1")
+    roster = pd.DataFrame(
+        [
+            {
+                "roster_version": version,
+                "station_triplet": triplet,
+                "basin": basin,
+                "basin_weight": float(basin_weights[basin]),
+            }
+            for triplet, basin in sorted(station_basins.items())
+        ]
+    )
+    conn.register("_snotel_roster", roster)
+    conn.execute("CREATE OR REPLACE TABLE snotel_roster AS SELECT * FROM _snotel_roster")
+    conn.unregister("_snotel_roster")
+    logging.info(f"SNOTEL roster {version}: {len(roster)} sites")
 
 
 def fetch_snotel_daily(triplets: list[str], start: str, end: str) -> list[tuple]:
@@ -123,6 +201,10 @@ def ingest_snotel(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         )
     """)
     sites = fetch_awdb_stations(cfg["states"], "SNTL", cfg["basins"])
+    retired = sorted(set(roster_stations(cfg)) - {s["station_triplet"] for s in sites})
+    if retired:
+        sites += fetch_awdb_stations(cfg["states"], "SNTL", cfg["basins"], station_triplets=retired)
+    create_snotel_roster(conn, sites, cfg)
     conn.executemany(
         "INSERT OR REPLACE INTO snotel_sites VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS DATE))",
         [tuple(s.values()) for s in sites],
@@ -327,12 +409,12 @@ def transform_covariates(
     conn.execute(f"""
         CREATE OR REPLACE TABLE monthly_covariates AS
         WITH eom AS (
-            SELECT s.basin, DATE_TRUNC('month', d.d) AS month, d.*
-            FROM snotel_daily d JOIN snotel_sites s USING (station_triplet)
+            SELECT s.basin, s.roster_version, DATE_TRUNC('month', d.d) AS month, d.*
+            FROM snotel_daily d JOIN snotel_roster s USING (station_triplet)
             WHERE d.d = LAST_DAY(d.d) AND d.wteq_in IS NOT NULL
         ),
         snow AS (
-            SELECT month, basin, COUNT(*) AS n,
+            SELECT month, basin, roster_version, COUNT(*) AS n,
                    AVG(wteq_in) AS swe, AVG(prec_in) AS prec, AVG(sms_8_pct) AS sms,
                    SUM(wteq_in) FILTER (wteq_median_in IS NOT NULL) AS swe_sum,
                    SUM(wteq_median_in) AS swe_med,
@@ -348,7 +430,8 @@ def transform_covariates(
                    100 * SUM(swe_sum) / NULLIF(SUM(swe_med), 0) AS swe_pct_median_gsl,
                    100 * SUM(prec_sum) / NULLIF(SUM(prec_med), 0) AS prec_pct_median_gsl,
                    SUM(sms * n) / SUM(n) AS sms_eom_gsl,
-                   SUM(n) AS n_snotel_sites
+                   SUM(n) AS n_snotel_sites,
+                   ANY_VALUE(roster_version) AS snotel_roster_version
             FROM snow GROUP BY month
         ),
         flow AS (

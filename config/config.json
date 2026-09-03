@@ -63,7 +63,53 @@
         "160201": "weber",
         "160202": "provo_jordan"
       },
-      "start": "1978-10-01"
+      "start": "1978-10-01",
+      "roster": {
+        "version": "gsl-modern-complete-v1",
+        "rule": "SNOTEL sites with a month-end SWE value in every month from 1989-10 to 2026-08.",
+        "basin_weights": {
+          "bear": 0.588,
+          "weber": 0.163,
+          "provo_jordan": 0.249
+        },
+        "stations": {
+          "bear": [
+            "374:UT:SNTL",
+            "455:UT:SNTL",
+            "471:ID:SNTL",
+            "484:ID:SNTL",
+            "493:ID:SNTL",
+            "517:UT:SNTL",
+            "579:UT:SNTL",
+            "582:UT:SNTL",
+            "634:UT:SNTL",
+            "823:UT:SNTL"
+          ],
+          "weber": [
+            "332:UT:SNTL",
+            "333:UT:SNTL",
+            "392:UT:SNTL",
+            "393:UT:SNTL",
+            "474:UT:SNTL",
+            "533:UT:SNTL",
+            "684:UT:SNTL",
+            "763:UT:SNTL",
+            "814:UT:SNTL"
+          ],
+          "provo_jordan": [
+            "330:UT:SNTL",
+            "366:UT:SNTL",
+            "399:UT:SNTL",
+            "400:UT:SNTL",
+            "596:UT:SNTL",
+            "628:UT:SNTL",
+            "686:UT:SNTL",
+            "766:UT:SNTL",
+            "820:UT:SNTL",
+            "828:UT:SNTL"
+          ]
+        }
+      }
     },
     "reservoirs": {
       "states": [
