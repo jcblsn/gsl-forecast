@@ -392,6 +392,7 @@ The quantile set is 0.05, 0.25, 0.50, 0.75 and 0.95.
 The band is conditional on the issue season. The errors are strongly heteroskedastic by
 season: 1 band over every issue month gave the `blend` a coverage of 0.82 at lead 6 from an
 accumulation issue and 0.98 from a recession issue, both with the same width of 2.31 ft.
+Aggregate coverage of 0.87 hid both.
 
 A season cell holds about 13 to 22 errors at 1 lead. That is enough to estimate a centre and
 a width, and too few to read a 5% or a 95% quantile from. Therefore the centre and the width
@@ -409,9 +410,10 @@ Standardising before pooling matters. Pooling the raw errors would give every se
 tail of whichever season has the widest errors, so a band scaled down for a narrow season
 would keep a skew the narrow season does not have.
 
-At lead 6 the `blend` band is now 2.89 ft wide from an accumulation issue and 1.65 ft from a
-recession issue, with coverages of 0.85 and 0.85. The rule moves width to where the errors
-are, and it does not manufacture information: coverage stays below 0.90.
+At lead 6 the `blend` band is now 3.36 ft wide from an accumulation issue and 1.54 ft from a
+recession issue, with coverages of 0.89 and 0.93. The rule moves width to where the errors
+are. It does not manufacture information: the accumulation season is genuinely harder, and
+its band is genuinely wider.
 
 Three scores measure the intervals: the weighted interval score, the unweighted mean pinball
 loss over the quantile set, and the share of actuals inside the nominal central 90 percent
@@ -473,15 +475,16 @@ For the frozen development run the `blend` MAE intervals are:
 
 | Lead | MAE | 95% interval | Improvement over `naive_last` |
 |---:|---:|---|---|
-| 1 | 0.126 | 0.099-0.153 | +0.210 [+0.174, +0.247] |
-| 3 | 0.319 | 0.250-0.399 | +0.580 [+0.484, +0.674] |
-| 6 | 0.521 | 0.368-0.724 | +0.809 [+0.680, +0.951] |
-| 12 | 1.069 | 0.722-1.498 | +0.216 [-0.056, +0.475] |
-| 18 | 1.615 | 1.093-2.168 | +0.296 [-0.075, +0.631] |
-| 24 | 1.999 | 1.368-2.617 | -0.205 [-0.667, +0.280] |
+| 1 | 0.124 | 0.102-0.148 | +0.210 [+0.170, +0.253] |
+| 3 | 0.330 | 0.279-0.388 | +0.568 [+0.451, +0.681] |
+| 6 | 0.573 | 0.451-0.736 | +0.753 [+0.601, +0.901] |
+| 12 | 1.070 | 0.788-1.398 | +0.210 [+0.071, +0.361] |
+| 18 | 1.553 | 1.090-2.020 | +0.349 [+0.141, +0.548] |
+| 24 | 1.915 | 1.294-2.522 | -0.129 [-0.461, +0.197] |
 
-The improvement is clear through lead 6 and includes 0 at leads 12, 18 and 24. A difference
-of a few hundredths of a foot between 2 models is not evidence of a better model.
+The improvement excludes 0 to lead 18 and includes it at 24. A difference of a few
+hundredths of a foot between 2 models is not evidence of a better model: the interval at
+lead 6 spans about 0.29 ft.
 
 These are descriptive sensitivity estimates. They are not formal sampling intervals under a
 fully specified data-generating process, and they do not prove stationarity.
@@ -500,27 +503,33 @@ fully specified data-generating process, and they do not prove stationarity.
 ## 9 Frozen development accuracy
 
 The maintained retrospective tables come from one cross-validation run,
-`GSL_CV_20260903_0004`: 157
-cutoffs from 2011-08 to 2024-08, data through 2026-08. `data/results/` holds a snapshot of
-that run. Its manifest records the development-only status, limitations and hashes, and CI
-verifies those hashes. The README section "Frozen development results" holds the tables, and
-`gsl-results --tables` prints them from the snapshot. This repeatedly used record is not
-untouched test evidence. `docs/autoresearch.log` is a historical experiment log.
+`GSL_CV_20260903_1751`: 157 cutoffs from 2011-08 to 2024-08, training from 1989-10, data
+through 2026-08. `data/results/` holds a snapshot of that run. Its manifest records the
+development-only status, limitations and hashes, and CI verifies those hashes. The README
+section "Frozen development results" holds the tables, and `gsl-results --tables` prints them
+from the snapshot. This repeatedly used record is not untouched test evidence.
+`docs/autoresearch.log` is a historical experiment log.
 
 The experiment tracker database is the working file for a run in progress. `.gitignore`
 excludes it, so the snapshot rather than an experiment id is the citation.
 
 In short:
 
-- `blend` is best or equal on both headline numbers, and it holds that position through lead
-  12. It is the model the page shows.
-- `swe_head` is the best model for the maximum April–June monthly mean from a January issue,
-  at 0.70 ft against 1.62 ft for a repeat of the last value.
-- Past lead 18 `blend` loses to `blend_swe` and to `swe_regression`, because it uses
-  `swe_head`, which is the weakest covariate model at long leads.
-- At lead 24 no model beats a repeat of the last value. `naive_last` is 1.79 ft, against
-  1.86 ft for the best model.
-- The 90 percent interval covers 0.87 to 0.89 of the actual values at leads 6 and 12.
+- The state-only baselines are strong. `endpoint_seasonal` is the best model at lead 1 at
+  0.10 ft, at lead 24 at 1.70 ft against 1.79 ft for a repeat of the last value, and on the
+  water-year-end target from June, July and August issues. It reads no snowpack and no
+  streamflow. `endpoint_analog`, which conditions the same change on the current level, does
+  not improve on it here.
+- `swe_head` is the best model from lead 3 to lead 17, and the best model for the maximum
+  April–June monthly mean from a January issue, at 0.74 ft against 1.62 ft for a repeat of
+  the last value.
+- `blend` is still the prototype headline and no longer wins anywhere outright. `swe_head`
+  matches or beats it at every lead to 18, and `endpoint_seasonal` beats both at 24. Its
+  paired improvement over `naive_last` excludes no improvement at leads 1, 3, 6, 12 and 18,
+  and includes it at 24. Removing blend degrees of freedom unless they win a locked test
+  remains open work.
+- The 90 percent interval covers 0.87 of the actual values at lead 6 and 0.87 at lead 12 in
+  aggregate. Section 7 gives the coverage per issue season, which is what a decision needs.
 
 ## 10 Open questions
 

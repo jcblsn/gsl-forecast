@@ -248,68 +248,77 @@ uv run --frozen gsl-plot [--history-years 10] [--output outputs/gsl_forecast.png
 ## Frozen development results
 
 Walk-forward cross-validation: 157 month-end cutoffs from August 2011 to August 2024,
-24-month horizon, training from 1960, data through August 2026. This repeatedly used cohort is
-development evidence, not an untouched test set. Every number below comes from
-`GSL_CV_20260903_0004`; `data/results/manifest.json` freezes and hashes its snapshot. MAE is in feet.
-The ratio is `blend` MAE divided by `naive_last` MAE at the same lead, so below 1.00 beats
+24-month horizon, training from 1989-10, data through August 2026. This repeatedly used cohort
+is development evidence, not an untouched test set. Every number below comes from
+`GSL_CV_20260903_1751`; `data/results/manifest.json` freezes and hashes its snapshot. MAE is in
+feet. The ratio is `blend` MAE divided by `naive_last` MAE at the same lead, so below 1.00 beats
 a repeat of the last value. `gsl-results --tables` prints these 3 tables from those files,
 so a published number and the run behind it cannot drift apart.
 
-| Lead | blend | swe_head | swe_regression | blend_swe | inflow_chain | ets_damped_s12 | naive_last | Ratio (blend) |
+MAE by lead (ft):
+
+| Lead | blend | swe_head | swe_regression | inflow_chain | endpoint_seasonal | endpoint_analog | ets_damped_s12 | naive_last | Ratio (blend) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0.13 | 0.13 | 0.13 | 0.14 | 0.10 | 0.11 | 0.14 | 0.34 | 0.37 |
+| 3 | 0.33 | 0.33 | 0.32 | 0.34 | 0.36 | 0.37 | 0.43 | 0.90 | 0.37 |
+| 6 | 0.58 | 0.55 | 0.57 | 0.58 | 0.65 | 0.69 | 0.81 | 1.33 | 0.43 |
+| 9 | 0.81 | 0.78 | 0.82 | 0.84 | 0.89 | 0.98 | 1.07 | 1.26 | 0.65 |
+| 12 | 1.08 | 1.04 | 1.09 | 1.12 | 1.12 | 1.25 | 1.25 | 1.28 | 0.84 |
+| 18 | 1.56 | 1.51 | 1.50 | 1.53 | 1.50 | 1.63 | 1.66 | 1.91 | 0.82 |
+| 24 | 1.92 | 2.01 | 1.86 | 1.85 | 1.70 | 1.86 | 1.92 | 1.79 | 1.07 |
+
+Weighted interval score and nominal central-90% coverage:
+
+| Lead | blend | swe_head | swe_regression | inflow_chain | endpoint_seasonal | endpoint_analog | ets_damped_s12 | naive_last |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 0.13 | 0.13 | 0.12 | 0.12 | 0.15 | 0.14 | 0.34 | 0.38 |
-| 3 | 0.32 | 0.32 | 0.31 | 0.31 | 0.37 | 0.45 | 0.90 | 0.35 |
-| 6 | 0.52 | 0.51 | 0.55 | 0.57 | 0.68 | 0.82 | 1.33 | 0.39 |
-| 9 | 0.77 | 0.76 | 0.79 | 0.82 | 0.98 | 1.08 | 1.26 | 0.62 |
-| 12 | 1.07 | 1.07 | 1.07 | 1.07 | 1.32 | 1.25 | 1.28 | 0.83 |
-| 18 | 1.61 | 1.72 | 1.56 | 1.53 | 1.86 | 1.65 | 1.91 | 0.85 |
-| 24 | 2.00 | 2.32 | 1.95 | 1.86 | 2.31 | 1.92 | 1.79 | 1.11 |
+| 6 | 0.39 / 0.87 | 0.38 / 0.87 | 0.39 / 0.86 | 0.36 / 0.86 | 0.44 / 0.88 | 0.44 / 0.87 | 0.49 / 0.89 | 0.62 / 0.85 |
+| 12 | 0.72 / 0.87 | 0.70 / 0.89 | 0.71 / 0.88 | 0.67 / 0.88 | 0.78 / 0.86 | 0.79 / 0.84 | 0.78 / 0.86 | 0.78 / 0.85 |
 
-Mean pinball loss and nominal central-90% coverage. Each cell is loss / observed coverage:
+Headline scalars by issue date (MAE, ft):
 
-| Lead | blend | swe_head | swe_regression | blend_swe | inflow_chain | ets_damped_s12 | naive_last |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 6 | 0.19 / 0.88 | 0.18 / 0.88 | 0.19 / 0.89 | 0.19 / 0.89 | 0.18 / 0.87 | 0.26 / 0.89 | 0.40 / 0.89 |
-| 12 | 0.35 / 0.89 | 0.35 / 0.89 | 0.36 / 0.89 | 0.35 / 0.88 | 0.32 / 0.89 | 0.38 / 0.88 | 0.38 / 0.87 |
-
-The 2 reported summaries, by issue date (MAE, ft):
-
-| Target | Issue | blend | swe_head | swe_regression | blend_swe | inflow_chain | ets_damped_s12 | naive_last |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Maximum April–June monthly mean | Jan 1 | 0.71 | 0.70 | 0.85 | 0.87 | 0.84 | 1.01 | 1.62 |
-| Maximum April–June monthly mean | Feb 1 | 0.57 | 0.56 | 0.61 | 0.63 | 0.62 | 0.87 | 1.39 |
-| Maximum April–June monthly mean | Mar 1 | 0.43 | 0.42 | 0.44 | 0.46 | 0.42 | 0.70 | 1.03 |
-| Maximum April–June monthly mean | Apr 1 | 0.30 | 0.30 | 0.26 | 0.27 | 0.27 | 0.41 | 0.62 |
-| Maximum April–June monthly mean | May 1 | 0.12 | 0.12 | 0.14 | 0.14 | 0.12 | 0.18 | 0.29 |
-| September mean (water-year end) | Jan 1 | 0.90 | 0.89 | 0.97 | 1.02 | 1.13 | 1.28 | 1.23 |
-| September mean (water-year end) | Apr 1 | 0.50 | 0.50 | 0.46 | 0.50 | 0.78 | 0.94 | 1.58 |
-| September mean (water-year end) | Jun 1 | 0.36 | 0.36 | 0.32 | 0.32 | 0.53 | 0.56 | 1.78 |
-| September mean (water-year end) | Jul 1 | 0.30 | 0.29 | 0.26 | 0.29 | 0.37 | 0.55 | 1.61 |
-| September mean (water-year end) | Aug 1 | 0.19 | 0.18 | 0.18 | 0.18 | 0.19 | 0.30 | 1.05 |
+| Target | Issue | blend | swe_head | swe_regression | inflow_chain | endpoint_seasonal | endpoint_analog | ets_damped_s12 | naive_last |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Maximum April–June monthly mean | Jan 1 | 0.78 | 0.74 | 0.87 | 0.87 | 0.91 | 1.02 | 1.00 | 1.62 |
+| Maximum April–June monthly mean | Feb 1 | 0.65 | 0.63 | 0.64 | 0.61 | 0.83 | 0.94 | 0.83 | 1.39 |
+| Maximum April–June monthly mean | Mar 1 | 0.51 | 0.48 | 0.49 | 0.46 | 0.69 | 0.78 | 0.65 | 1.03 |
+| Maximum April–June monthly mean | Apr 1 | 0.33 | 0.33 | 0.31 | 0.30 | 0.45 | 0.46 | 0.38 | 0.62 |
+| Maximum April–June monthly mean | May 1 | 0.16 | 0.16 | 0.19 | 0.18 | 0.17 | 0.17 | 0.15 | 0.29 |
+| September mean (water-year end) | Jan 1 | 0.95 | 0.90 | 1.00 | 1.03 | 1.10 | 1.21 | 1.27 | 1.23 |
+| September mean (water-year end) | Apr 1 | 0.66 | 0.63 | 0.59 | 0.63 | 0.70 | 0.71 | 0.84 | 1.58 |
+| September mean (water-year end) | Jun 1 | 0.34 | 0.36 | 0.36 | 0.36 | 0.24 | 0.25 | 0.58 | 1.78 |
+| September mean (water-year end) | Jul 1 | 0.24 | 0.23 | 0.22 | 0.20 | 0.16 | 0.16 | 0.58 | 1.61 |
+| September mean (water-year end) | Aug 1 | 0.17 | 0.17 | 0.17 | 0.17 | 0.14 | 0.13 | 0.25 | 1.05 |
 
 Snowpack settles the winter case. From a January 1 issue, the model that uses the lake record
-alone has an April–June monthly-mean maximum error of 1.01 ft, which is no better than a repeat of the last value. Adding
-snowpack and the head difference between the arms brings it to 0.70 ft. The summer decline is
-also predictable: from a June 1 issue, the September level is known to about a third of a
-foot, against 1.78 ft for a repeat of the last value.
+alone has an April–June monthly-mean maximum error of 1.00 ft, which is no better than a repeat
+of the last value. Adding snowpack and the head difference between the arms brings it to
+0.74 ft. The summer decline is also predictable: from a June 1 issue, the September level is
+known to about a quarter of a foot, against 1.78 ft for a repeat of the last value.
 
-`blend` is the current prototype headline because it is best or tied on both summaries, and it
-has the lowest point estimate of MAE through lead 12. The uncertainty in paired comparisons
-does not demonstrate an advantage over persistence at leads 12–24. Past lead 18 it loses to
-`blend_swe` and to `swe_regression`, because it inherits the long-lead weakness of
-`swe_head`. At lead 24 no model beats a repeat of the last value: `naive_last` is 1.79 ft
-against 1.86 ft for the best model and 2.00 ft for `blend`.
+The state-only baselines are strong, which is the point of adding them. `endpoint_seasonal`,
+which is the last daily level plus the historical median change for the issue month and lead,
+is the best model at lead 1 (0.10 ft), at lead 24 (1.70 ft, ahead of `naive_last` at 1.79) and
+on the water-year-end target from June, July and August issues. It uses no snowpack and no
+streamflow. Conditioning its change on the current level, in `endpoint_analog`, does not help
+on this cohort.
 
-`inflow_chain_area`, which puts lake area from the hypsometry table in place of the level,
-scores within 0.04 ft of `inflow_chain` at every lead, so the hypsometry does not yet help.
+`blend` is still the prototype headline, but it no longer wins anywhere outright: `swe_head`
+matches or beats it at every lead to 18, and `endpoint_seasonal` beats both at 24. Its
+paired improvement over `naive_last` has an interval that excludes no improvement at leads 1,
+3, 6, 12 and 18, and includes it at 24. The review's recommendation to remove blend degrees
+of freedom unless they win a locked test is still open.
 
 The nominal central 90% interval is calibrated from retrospective errors, at 1 lead at a time
 and for the season the issue falls in. One band over every issue month gave the `blend` a
 coverage of 0.82 at lead 6 from an accumulation issue and 0.98 from a recession issue, both
-2.31 ft wide. The season-conditional band is 2.89 ft and 1.65 ft wide, at 0.85 and 0.85. The
+2.31 ft wide. The season-conditional band is 3.36 ft and 1.54 ft wide, at 0.89 and 0.93. The
 band is still marginal at each lead, so it does not give a probability for the spring maximum
 or the date of the minimum. The published point line is not necessarily q50. Section 7 of
 `docs/model-spec.md` gives the limits.
+
+Section 8.1 of `docs/model-spec.md` gives the block-bootstrap interval around every number
+above. At lead 6 the `blend` MAE interval is 0.451 to 0.736 ft. Differences of a few
+hundredths of a foot between the columns above are inside that.
 
 ### Against the NRCS record
 

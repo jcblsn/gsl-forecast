@@ -155,12 +155,13 @@ def test_a_snapshot_round_trips_to_the_same_numbers(tmp_path):
 
 
 def test_frozen_development_snapshot_matches_its_manifest():
+    """Pinned on purpose. Refreezing the snapshot is a decision, not a side effect."""
     manifest = results.verify_manifest()
     assert manifest["snapshot_status"] == "frozen_development_only"
-    assert manifest["source_run"] == "GSL_CV_20260903_0004"
-    assert manifest["numeric_value_count"] == 2774
+    assert manifest["source_run"] == "GSL_CV_20260903_1751"
+    assert manifest["numeric_value_count"] == 4080
     summary, headline, _ = results.read_results()
-    assert "mean_pinball_loss" in summary and "crps" not in summary
+    assert "wis" in summary and "mean_pinball_loss" in summary and "crps" not in summary
     assert set(headline["target"]) == {
         "apr_jun_monthly_mean_max",
         "september_monthly_mean",

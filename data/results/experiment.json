@@ -1,0 +1,31 @@
+{
+  "argv": "/Users/jacobeliason/Files/code/gsl-forecast/.venv/bin/gsl-cv --no-plots --results-dir data/results",
+  "artifacts": [],
+  "created_at": "2026-09-03 21:51:53",
+  "description": "Walk-forward CV: 157 cutoffs (development), 24-month horizon, training from 1989-10-01",
+  "experiment_id": 4,
+  "git_commit": "5ef4699ffb9d570a6d6b314c0bb308896ad81f8b",
+  "git_dirty": 1,
+  "name": "GSL_CV_20260903_1751",
+  "note": null,
+  "python": "3.12.7",
+  "tags": {
+    "cutoff_policy": "development",
+    "cv_parquet": "./outputs/cv_results_20260903_1751.parquet",
+    "data_max": "2026-08-01",
+    "data_min": "1847-10-01",
+    "evaluation_policy_version": "gsl-evaluation-v1",
+    "evaluation_split": "development",
+    "evaluation_split_status": "open_development",
+    "first_cutoff": "2011-08-01",
+    "headline_model": "blend",
+    "horizon": "24",
+    "last_cutoff": "2024-08-01",
+    "models": "blend,blend3_chain,blend3_swe,blend_swe,drift_12m,drift_24m,drift_60m,endpoint_analog,endpoint_seasonal,ets_add_noseas,ets_add_s12,ets_damped_noseas,ets_damped_s12,inflow_chain,inflow_chain_area,ma_simple_12,ma_simple_3,ma_simple_6,naive_last,naive_seasonal,state_space,swe_head,swe_regression,theta",
+    "n_cutoffs": "157",
+    "n_months_available": "1783",
+    "policy_cutoff_end": "2024-08-01",
+    "policy_cutoff_start": "2011-08-01",
+    "train_start": "1989-10-01"
+  }
+}
