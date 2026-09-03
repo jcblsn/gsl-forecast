@@ -14,7 +14,15 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from ..base import Forecaster
-from .regression import TARGET_COL, TIME_COL, design, require_columns, ridge_fit
+from .regression import (
+    TARGET_COL,
+    TIME_COL,
+    design,
+    fallback_reason,
+    log_fallback,
+    require_columns,
+    ridge_fit,
+)
 
 DEFAULT_FEATURES = ["swe_eom_gsl", "prec_wy_eom_gsl"]
 
@@ -24,7 +32,7 @@ class SweRegressionForecaster(Forecaster):
         self,
         features: list[str] | None = None,
         min_obs: int = 10,
-        alpha: float = 1e-3,
+        alpha: float | None = None,
         name: str = "swe_regression",
     ):
         super().__init__(name=name)
@@ -60,11 +68,13 @@ class SweRegressionForecaster(Forecaster):
         rows = df.iloc[idx]
         ok = rows[self.features].notna().all(axis=1).to_numpy()
         have_now = bool(last[self.features].notna().all())
-        if ok.sum() >= self.min_obs and have_now:
+        reason = fallback_reason(int(ok.sum()), self.min_obs, have_now)
+        if reason is None:
             cols = [TARGET_COL, *self.features]
             beta = ridge_fit(design(rows[ok], cols), dy[ok], self.alpha)
             x = np.concatenate([[1.0], last[cols].to_numpy(dtype=float)])
             return float(x @ beta)
+        log_fallback(self.name, h, reason)
         beta = ridge_fit(design(rows, [TARGET_COL]), dy, self.alpha)
         return float(np.array([1.0, last[TARGET_COL]]) @ beta)
 
@@ -83,4 +93,8 @@ class SweRegressionForecaster(Forecaster):
         )
 
     def get_metrics(self) -> dict[str, object]:
-        return {"features": ",".join(self.features), "min_obs": self.min_obs, "alpha": self.alpha}
+        return {
+            "features": ",".join(self.features),
+            "min_obs": self.min_obs,
+            "alpha": self.alpha if self.alpha is not None else "gcv",
+        }

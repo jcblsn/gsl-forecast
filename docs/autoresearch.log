@@ -11,3 +11,6 @@
 2026-09-02 | swe_head | + head_diff_ft (south minus north arm) | 0.566 | 0.526 | - | 0.529 | 0.193 | 2.108 | keep: peak_mae_feb and mae_h6 both improve; Jan peak 0.694 vs 0.838; worse beyond h15; registered as swe_head
 2026-09-02 | chain_res | stage one + res_kaf_total | 0.726 | 0.829 | - | 0.970 | 0.217 | 2.467 | no
 2026-09-02 | chain_pct_res | stage one percent-of-median + res_kaf_total | 0.722 | 0.838 | - | 1.015 | 0.176 | 2.374 | no
+# 2026-09-02: the estimator changed. ridge_fit now standardises the design and picks alpha
+# per fit by generalised cross-validation. Lines above this one use the old unstandardised
+# fit with alpha=1e-3, which never bound, so they are not comparable with the lines below.

@@ -17,7 +17,15 @@ from dateutil.relativedelta import relativedelta
 
 from .. import hypsometry
 from ..base import Forecaster
-from .regression import TARGET_COL, TIME_COL, design, require_columns, ridge_fit
+from .regression import (
+    TARGET_COL,
+    TIME_COL,
+    design,
+    fallback_reason,
+    log_fallback,
+    require_columns,
+    ridge_fit,
+)
 
 INFLOW_COL = "inflow_kaf_total"
 DEFAULT_SNOW = ["swe_eom_gsl", "prec_wy_eom_gsl"]
@@ -28,7 +36,7 @@ class InflowChainForecaster(Forecaster):
         self,
         snow_features: list[str] | None = None,
         min_obs: int = 10,
-        alpha: float = 1e-3,
+        alpha: float | None = None,
         level_term: str = "level",
         name: str = "inflow_chain",
     ):
@@ -90,10 +98,13 @@ class InflowChainForecaster(Forecaster):
         rows = df.iloc[idx]
         target = df[INFLOW_COL].to_numpy(dtype=float)[[i + h for i in idx]]
         ok = rows[self.snow_features].notna().all(axis=1).to_numpy() & ~np.isnan(target)
-        if ok.sum() >= self.min_obs and bool(last[self.snow_features].notna().all()):
+        have_now = bool(last[self.snow_features].notna().all())
+        reason = fallback_reason(int(ok.sum()), self.min_obs, have_now)
+        if reason is None:
             beta = ridge_fit(design(rows[ok], self.snow_features), target[ok], self.alpha)
             x = np.concatenate([[1.0], last[self.snow_features].to_numpy(dtype=float)])
             return max(float(x @ beta), 0.0)
+        log_fallback(self.name, h, reason)
         return float(self._mean_inflow.get(target_month, np.nan))
 
     def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
@@ -124,6 +135,6 @@ class InflowChainForecaster(Forecaster):
         return {
             "snow_features": ",".join(self.snow_features),
             "min_obs": self.min_obs,
-            "alpha": self.alpha,
+            "alpha": self.alpha if self.alpha is not None else "gcv",
             "level_term": self.level_term,
         }

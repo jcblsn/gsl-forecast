@@ -5,7 +5,13 @@ import pandas as pd
 import pytest
 from dateutil.relativedelta import relativedelta
 
+from src.forecasting.multivariate.blend import (
+    BlendForecaster,
+    default_weights,
+    monotone_decreasing,
+)
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
+from src.forecasting.multivariate.regression import fallback_reason, gcv_alpha, ridge_fit
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 
 
@@ -69,3 +75,91 @@ def test_falls_back_when_covariates_missing_at_cutoff(synthetic):
     train.loc[train.index[-1], ["swe_eom_gsl", "prec_wy_eom_gsl"]] = np.nan
     preds = SweRegressionForecaster().fit(train).predict(3)
     assert preds["pred"].notna().all()
+
+
+def test_ridge_matches_least_squares_with_a_tiny_penalty():
+    rng = np.random.default_rng(1)
+    X = np.column_stack([np.ones(60), rng.normal(size=(60, 2))])
+    y = 3.0 + 2.0 * X[:, 1] - 1.5 * X[:, 2] + rng.normal(scale=0.1, size=60)
+    beta = ridge_fit(X, y, alpha=1e-10)
+    expected = np.linalg.lstsq(X, y, rcond=None)[0]
+    assert np.allclose(beta, expected, atol=1e-6)
+
+
+def test_ridge_predictions_are_invariant_to_feature_scale():
+    rng = np.random.default_rng(2)
+    X = np.column_stack([np.ones(60), rng.normal(size=(60, 2))])
+    y = 4192.0 + 0.5 * X[:, 1] + rng.normal(scale=0.1, size=60)
+    scaled = X.copy()
+    scaled[:, 1] *= 1000.0
+    plain = X @ ridge_fit(X, y, alpha=1.0)
+    rescaled = scaled @ ridge_fit(scaled, y, alpha=1.0)
+    assert np.allclose(plain, rescaled, atol=1e-8)
+
+
+def test_gcv_picks_a_larger_penalty_for_pure_noise():
+    rng = np.random.default_rng(3)
+    X = np.column_stack([np.ones(40), rng.normal(size=(40, 3))])
+    signal = 4192.0 + 5.0 * X[:, 1]
+    noise = 4192.0 + rng.normal(scale=1.0, size=40)
+    assert gcv_alpha(*_centered(X, noise)) > gcv_alpha(*_centered(X, signal))
+
+
+def _centered(X, y):
+    features = X[:, 1:]
+    z = (features - features.mean(axis=0)) / features.std(axis=0)
+    return z, y - y.mean()
+
+
+def test_fallback_reason_states_the_rule():
+    assert fallback_reason(20, 10, True) is None
+    assert "NULL at the cutoff" in fallback_reason(20, 10, False)
+    assert "min_obs=10" in fallback_reason(4, 10, True)
+
+
+def _blend(**kw):
+    return BlendForecaster(horizon=12, history_years=8, max_cutoffs=15, min_cutoffs=6, **kw)
+
+
+def test_blend_weights_fall_with_the_lead(synthetic):
+    model = _blend().fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
+    w = model.weights
+    assert len(w) == 12
+    assert ((w >= 0) & (w <= 1)).all()
+    assert (np.diff(w) <= 1e-9).all()
+    assert model.n_weight_cutoffs >= 6
+
+
+def test_blend_uses_no_rows_after_the_cutoff(synthetic):
+    cutoff = pd.Timestamp("2015-03-01")
+    train = synthetic[synthetic["month"] <= cutoff]
+    base = _blend().fit(train)
+    tampered = synthetic.copy()
+    future = tampered["month"] > cutoff
+    tampered.loc[future, "avg_elevation"] += 25.0
+    tampered.loc[future, "swe_eom_gsl"] *= 3.0
+    again = _blend().fit(tampered[tampered["month"] <= cutoff])
+    assert np.allclose(base.weights, again.weights)
+    assert np.allclose(base.predict(12)["pred"], again.predict(12)["pred"])
+
+
+def test_blend_lies_between_its_components(synthetic):
+    train = synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")]
+    model = _blend().fit(train)
+    snow, univariate = (f.predict(12)["pred"].to_numpy() for f in model._fitted)
+    blended = model.predict(12)["pred"].to_numpy()
+    assert (blended >= np.minimum(snow, univariate) - 1e-9).all()
+    assert (blended <= np.maximum(snow, univariate) + 1e-9).all()
+
+
+def test_monotone_decreasing_pools_violators():
+    out = monotone_decreasing(np.array([0.2, 0.8, 0.5]))
+    assert (np.diff(out) <= 1e-9).all()
+    assert np.isclose(out.mean(), 0.5)
+
+
+def test_default_weights_ramp_from_one_to_zero():
+    w = default_weights(24)
+    assert w[0] == 1.0 and w[5] == 1.0
+    assert w[-1] == 0.0
+    assert (np.diff(w) <= 1e-9).all()

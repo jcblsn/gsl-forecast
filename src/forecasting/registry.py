@@ -1,4 +1,5 @@
 from src.forecasting.base import Forecaster
+from src.forecasting.multivariate.blend import BlendForecaster
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 from src.forecasting.univariate.drift import DriftForecaster
@@ -32,6 +33,7 @@ def all_forecasters() -> list[Forecaster]:
         ),
         InflowChainForecaster(),
         InflowChainForecaster(level_term="area", name="inflow_chain_area"),
+        BlendForecaster(),
     ]
 
 
@@ -45,6 +47,8 @@ PRODUCTION_MODELS = {
     "theta",
     "swe_regression",
     "inflow_chain",
+    "swe_head",
+    "blend",
 }
 
 

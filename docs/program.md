@@ -39,28 +39,42 @@ pipeline change first, and only then a feature the loop may use.
 ## Ideas queue
 
 Results so far are in `docs/autoresearch.log`. Reservoir storage as a plain extra regressor
-overfits (about 13 training rows per calendar month); it needs a lower-dimensional form,
-such as storage deficit as a fraction of capacity, or a longer training window. The head
-difference between the arms helps the peak and is registered as `swe_head`.
+lowers skill. The cause is not a small sample: each fit has 32 rows at a 2011 cutoff and 47
+rows at a 2026 cutoff, against 4 parameters. The cause is collinearity, because storage
+moves with the lake level and with the same long trend. Storage needs a form that carries
+new information, such as the deficit below capacity. The head difference between the arms
+helps the peak and is registered as `swe_head`.
 
 Columns already in `monthly_covariates` (see the README data section):
 
-- `swe_pct_median_*` and `prec_pct_median_*` in place of raw inches (the site roster grew
-  from 18 to 55 sites, so raw means drift).
+- A season-aware feature set. `swe_pct_median_*` is NULL from June to September, because the
+  median of the site sum is 0 in those months. So the `swe_pct` run in the log did not gain
+  skill after June from percent of median; it gained skill from the level-only fallback that
+  the NULL triggered. Test the schedule directly: snowpack from October to May, and soil
+  moisture or year-to-date inflow from June to September.
+- `prec_pct_median_*` in place of raw inches (the site roster grew from 18 to 55 sites, so
+  raw means drift). This column has no summer gap.
 - Separate Bear/Weber/Provo-Jordan terms instead of the pooled index.
 - Reservoir storage in a form that does not add a free coefficient per month: deficit
   below the long-run maximum, or a single pooled regression across calendar months.
 - `sms_eom_gsl` (8-inch soil moisture, from 1999) for autumn cutoffs.
 - `head_diff_ft` in the `inflow_chain` bucket step (it already helps `swe_regression`).
-- Ridge `alpha` well above 1e-3 for any model with three or more features.
-- Stacking: regress `ets_damped_s12` residuals at each horizon on snowpack anomalies.
-- A blend that follows `swe_regression` at leads 1-12 and moves to `ets_damped_s12` by
-  lead 24, registered as its own model so it is exported and verified.
+- Feature sets with 3 or more terms. The estimator standardises the design and picks `alpha`
+  per fit by generalised cross-validation, so a wide feature set is now shrunk rather than
+  fitted at full scale.
+- Stacking with more than the 2 components in `blend`, or a residual form that regresses
+  `ets_damped_s12` residuals at each lead on snowpack anomalies.
 
 Needs pipeline work first:
 
-- Bathymetry so `inflow_chain` uses lake area for evaporation instead of the level proxy.
-- The issued NRCS inflow forecast (`nrcs_inflow_forecasts`, from 2024) as an in-season
-  anchor for `inflow_chain` stage one once there are enough seasons to fit.
-- Climate division temperature and precipitation (NOAA nClimDiv) for the evaporation term.
+- The issued NRCS inflow forecast (`nrcs_inflow_forecasts`) as an in-season anchor for
+  `inflow_chain` stage one. There are 15 publication dates so far, which is too few to fit
+  a coefficient on.
 - Climate indices (NINO4, PDO, PNA, SOI) for leads beyond 12 months.
+
+Done and available:
+
+- Bathymetry, as `inflow_chain_area`. It scores within 0.02 ft of `inflow_chain`.
+- Climate division temperature and precipitation, as `tavg_f_gsl_lag1` and `prcp_in_gsl_lag1`.
+  Use the lagged columns only. NOAA releases a month around the 8th of the next month, so the
+  unlagged column is never available at issue time and would leak in cross-validation.
