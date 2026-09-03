@@ -474,21 +474,32 @@ def transform_covariates(
         flow_days AS (
             SELECT DATE_TRUNC('month', d) AS month, site_id,
                    SUM(discharge_cfs) AS cfs_days, COUNT(*) AS n_days,
-                   DAY(LAST_DAY(DATE_TRUNC('month', d))) AS month_days
+                   DAY(LAST_DAY(DATE_TRUNC('month', d))) AS month_days,
+                   COUNT(*) FILTER (
+                       LOWER(COALESCE(qualifiers, '')) LIKE '%provisional%'
+                   ) AS n_provisional,
+                   COUNT(*) FILTER (
+                       LOWER(COALESCE(qualifiers, '')) LIKE '%estimated%'
+                   ) AS n_estimated
             FROM usgs_discharge_daily
             GROUP BY ALL
         ),
         flow AS (
             SELECT month, site_id,
                    cfs_days / n_days * month_days * 86400.0 / 43560.0 / 1000.0 AS kaf,
-                   n_days::DOUBLE / month_days AS day_coverage
+                   n_days::DOUBLE / month_days AS day_coverage,
+                   n_provisional, n_estimated
             FROM flow_days WHERE n_days >= {MIN_FLOW_DAYS}
         ),
         flow_wide AS (
             SELECT month,
                    {flow_cols},
                    MIN(day_coverage) FILTER (site_id IN ({inflow_sites}))
-                       AS inflow_day_coverage
+                       AS inflow_day_coverage,
+                   SUM(n_provisional) FILTER (site_id IN ({inflow_sites}))
+                       AS inflow_provisional_days,
+                   SUM(n_estimated) FILTER (site_id IN ({inflow_sites}))
+                       AS inflow_estimated_days
             FROM flow GROUP BY month
         ),
         res AS (

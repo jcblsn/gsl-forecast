@@ -101,6 +101,11 @@ much of a value the scaling supplied. In the current database the lowest share a
 that pass the threshold is 28 of 31 days, so the rule corrects a latent defect and not the
 published scores.
 
+USGS records an approval status and a qualifier with every daily value. Those fields were
+stored and then ignored. `inflow_provisional_days` and `inflow_estimated_days` count the days
+behind each month's inflow that USGS marks provisional or estimated, so a model or a reader
+can tell an approved month from a month USGS will revise. No model reads them yet.
+
 ## 2.1 The endpoint seasonal baseline
 
 `endpoint_seasonal` is the strong state-only baseline. Within each fit it compares the last

@@ -363,7 +363,10 @@ def stub_db(daily_rows, roster_rows):
     )
     if roster_rows:
         conn.executemany("INSERT INTO snotel_roster VALUES (?, ?, ?, ?)", roster_rows)
-    conn.execute("CREATE TABLE usgs_discharge_daily (site_id VARCHAR, d DATE, discharge_cfs FLOAT)")
+    conn.execute(
+        "CREATE TABLE usgs_discharge_daily (site_id VARCHAR, d DATE, discharge_cfs FLOAT,"
+        " qualifiers VARCHAR)"
+    )
     conn.execute(
         "CREATE TABLE reservoir_monthly (station_triplet VARCHAR, month DATE, storage_kaf FLOAT)"
     )
@@ -418,7 +421,7 @@ def test_each_variable_counts_its_own_reporting_sites():
 
 def flow_db(daily_rows):
     conn = stub_db([], [])
-    conn.executemany("INSERT INTO usgs_discharge_daily VALUES (?, ?, ?)", daily_rows)
+    conn.executemany("INSERT INTO usgs_discharge_daily VALUES (?, ?, ?, 'Approved')", daily_rows)
     return conn
 
 
@@ -439,3 +442,19 @@ def test_a_month_below_the_day_threshold_is_dropped():
     with flow_db(rows) as conn:
         cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear"])
         assert conn.execute("SELECT COUNT(*) FROM monthly_covariates").fetchone() == (0,)
+
+
+def test_provisional_and_estimated_days_reach_the_modelled_table():
+    """USGS stores the approval and the qualifier; a model could not see either."""
+    rows = [("10126000", f"2020-01-{d:02d}", 1000.0, "Approved") for d in range(1, 26)]
+    rows += [("10126000", "2020-01-26", 1000.0, "Provisional")]
+    rows += [("10126000", f"2020-01-{d:02d}", 1000.0, "Approved,ESTIMATED") for d in (27, 28)]
+    conn = stub_db([], [])
+    conn.executemany("INSERT INTO usgs_discharge_daily VALUES (?, ?, ?, ?)", rows)
+    with conn:
+        cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear"])
+        row = conn.execute(
+            "SELECT inflow_provisional_days, inflow_estimated_days, inflow_day_coverage "
+            "FROM monthly_covariates"
+        ).fetchone()
+    assert row[:2] == (1, 2) and row[2] == pytest.approx(28 / 31)
