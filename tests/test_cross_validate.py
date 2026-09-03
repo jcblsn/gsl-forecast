@@ -86,6 +86,7 @@ class TestEvaluateAtCutoff:
         assert set(result.columns) >= {
             "model",
             "cutoff",
+            "target_month",
             "h",
             "pred",
             "actual",
@@ -94,6 +95,9 @@ class TestEvaluateAtCutoff:
         }
         assert len(result) == 6
         assert (result["h"] == list(range(1, 7))).all()
+        assert result["target_month"].tolist() == list(
+            pd.date_range(cutoff + pd.DateOffset(months=1), periods=6, freq="MS")
+        )
 
     def test_actuals_are_after_cutoff(self, monthly_data):
         cutoff = monthly_data["month"].iloc[60]
@@ -102,6 +106,27 @@ class TestEvaluateAtCutoff:
         )
         expected = monthly_data[monthly_data["month"] > cutoff]["avg_elevation"].head(6).tolist()
         assert result["actual"].tolist() == expected
+
+    def test_missing_target_month_fails_instead_of_shifting_actuals(self, monthly_data):
+        cutoff = monthly_data["month"].iloc[60]
+        missing = cutoff + pd.DateOffset(months=2)
+        incomplete = monthly_data[monthly_data["month"] != missing]
+
+        with pytest.raises(ValueError, match=f"Missing actual target month.*{missing.date()}"):
+            evaluate_at_cutoff(
+                incomplete, cutoff, [NaiveForecaster(method="last")], horizon=6
+            )
+
+    def test_forecaster_target_months_must_match_leads(self, monthly_data):
+        class ShiftedForecaster(NaiveForecaster):
+            def predict(self, h, start_date=None):
+                out = super().predict(h, start_date)
+                out["month"] += pd.DateOffset(months=1)
+                return out
+
+        cutoff = monthly_data["month"].iloc[60]
+        with pytest.raises(ValueError, match="target months that do not match"):
+            evaluate_at_cutoff(monthly_data, cutoff, [ShiftedForecaster()], horizon=6)
 
     def test_train_start_restricts_training(self, monthly_data):
         cutoff = monthly_data["month"].iloc[60]

@@ -65,7 +65,21 @@ def evaluate_at_cutoff(
     if train_start:
         train = train[train["month"] >= pd.Timestamp(train_start)]
     train = train.copy()
-    actuals = data[data["month"] > cutoff].head(horizon).reset_index(drop=True)
+    forecast_months = pd.date_range(
+        cutoff + pd.DateOffset(months=1), periods=horizon, freq="MS"
+    )
+    data_end = pd.to_datetime(data["month"]).max()
+    expected_months = forecast_months[forecast_months <= data_end]
+    actuals = (
+        data.assign(month=pd.to_datetime(data["month"]))
+        .set_index("month")
+        .reindex(expected_months)
+    )
+    missing_actuals = expected_months[actuals["avg_elevation"].isna()]
+    if len(missing_actuals):
+        missing = ", ".join(str(month.date()) for month in missing_actuals)
+        raise ValueError(f"Missing actual target month(s) after cutoff {cutoff.date()}: {missing}")
+    actuals = actuals.reset_index(names="target_month")
     actuals["h"] = range(1, len(actuals) + 1)
 
     frames = []
@@ -78,13 +92,20 @@ def evaluate_at_cutoff(
         if not np.isfinite(preds["pred"].to_numpy(dtype=float)).all():
             logging.warning(f"Forecaster {forecaster.name} gave non-finite values at {cutoff}")
             continue
-        preds["h"] = range(1, len(preds) + 1)
-        merged = preds.merge(actuals[["h", "avg_elevation"]], on="h")
+        predicted_months = pd.DatetimeIndex(pd.to_datetime(preds["month"]))
+        if len(preds) != horizon or not predicted_months.equals(forecast_months):
+            raise ValueError(
+                f"Forecaster {forecaster.name} returned target months that do not match "
+                f"the {horizon}-month horizon after {cutoff.date()}"
+            )
+        preds["target_month"] = predicted_months
+        merged = preds.merge(actuals[["target_month", "h", "avg_elevation"]], on="target_month")
         frames.append(
             pd.DataFrame(
                 {
                     "model": forecaster.name,
                     "cutoff": cutoff,
+                    "target_month": merged["target_month"],
                     "h": merged["h"].astype(int),
                     "pred": merged["pred"],
                     "actual": merged["avg_elevation"],
@@ -94,7 +115,16 @@ def evaluate_at_cutoff(
 
     if not frames:
         return pd.DataFrame(
-            columns=["model", "cutoff", "h", "pred", "actual", "abs_error", "sq_error"]
+            columns=[
+                "model",
+                "cutoff",
+                "target_month",
+                "h",
+                "pred",
+                "actual",
+                "abs_error",
+                "sq_error",
+            ]
         )
     out = pd.concat(frames, ignore_index=True)
     err = out["pred"] - out["actual"]
