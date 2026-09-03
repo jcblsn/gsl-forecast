@@ -2,9 +2,9 @@
 
 import argparse
 import glob
+import json
 import logging
 import os
-from datetime import date
 
 import pandas as pd
 
@@ -85,6 +85,12 @@ def hindcast_frame(
         on="month",
         how="left",
     )
+
+
+def latest_cv_parquet(output_dir: str) -> str | None:
+    """The most recently written cross-validation file under the output directory."""
+    paths = glob.glob(os.path.join(output_dir, "**", "cv_results_*.parquet"), recursive=True)
+    return max(paths, key=os.path.getmtime) if paths else None
 
 
 def score(fc: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
@@ -172,43 +178,55 @@ def plot(fc: pd.DataFrame, data: pd.DataFrame, cutoff: pd.Timestamp, path: str) 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Chart a hindcast from a past cutoff")
-    parser.add_argument("cutoff", help="Last month of data to use, YYYY-MM")
+    parser = argparse.ArgumentParser(description="Chart hindcasts from past cutoffs")
+    parser.add_argument("cutoffs", nargs="+", help="Last month of data to use, YYYY-MM")
     parser.add_argument("--models", default=",".join(DEFAULT_MODELS))
     parser.add_argument("--horizon", type=int)
     parser.add_argument("--cv", help="cv_results parquet for intervals (default: latest)")
-    parser.add_argument("--output-dir", help="Default: <config output_dir>/<today>")
+    parser.add_argument(
+        "--output-dir", help="Default: <config output_dir>/hindcasts/<YYYY-MM-DD_HHMM>"
+    )
     parser.add_argument("--config")
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
     config = load_config(args.config)
     fc_cfg = config["forecasting"]
-    cutoff = pd.Timestamp(args.cutoff + "-01")
     horizon = args.horizon or fc_cfg["horizon"]
     data = load_monthly_data(config["database"]["path"], fc_cfg["train_start"])
     wanted = args.models.split(",")
     forecasters = [f for f in all_forecasters() if f.name in wanted]
-    cv_path = args.cv or next(
-        iter(
-            sorted(
-                glob.glob(
-                    os.path.join(fc_cfg["output_dir"], "**", "cv_results_*.parquet"), recursive=True
-                ),
-                key=os.path.getmtime,
-                reverse=True,
-            )
-        ),
-        None,
-    )
+    unknown = sorted(set(wanted) - {f.name for f in forecasters})
+    if unknown:
+        parser.error(f"Unknown models: {unknown}")
+    cv_path = args.cv or latest_cv_parquet(fc_cfg["output_dir"])
     cv_df = pd.read_parquet(cv_path) if cv_path else None
-    fc = hindcast_frame(data, cutoff, forecasters, horizon, cv_df)
-    out_dir = args.output_dir or os.path.join(fc_cfg["output_dir"], date.today().isoformat())
+
+    out_dir = args.output_dir or os.path.join(
+        fc_cfg["output_dir"], "hindcasts", pd.Timestamp.now().strftime("%Y-%m-%d_%H%M")
+    )
     os.makedirs(out_dir, exist_ok=True)
-    stem = os.path.join(out_dir, f"{cutoff:%Y%m%d}_gsl_hindcast")
-    plot(fc, data, cutoff, stem + ".png")
-    fc.to_csv(stem + ".csv", index=False, float_format="%.3f")
-    print(f"Wrote {stem}.png and .csv (intervals from {cv_path or 'none'})")
-    print(score(fc, cutoff).to_string(index=False))
+    run = {
+        "created_at": pd.Timestamp.now().isoformat(timespec="seconds"),
+        "cutoffs": list(args.cutoffs),
+        "models": wanted,
+        "horizon": horizon,
+        "train_start": fc_cfg["train_start"],
+        "cv_parquet": cv_path,
+        "data_max": str(pd.Timestamp(data["month"].max()).date()),
+    }
+    with open(os.path.join(out_dir, "run.json"), "w") as handle:
+        json.dump(run, handle, indent=2)
+        handle.write("\n")
+
+    for value in args.cutoffs:
+        cutoff = pd.Timestamp(value + "-01")
+        fc = hindcast_frame(data, cutoff, forecasters, horizon, cv_df)
+        stem = os.path.join(out_dir, f"{cutoff:%Y%m%d}_gsl_hindcast")
+        plot(fc, data, cutoff, stem + ".png")
+        fc.to_csv(stem + ".csv", index=False, float_format="%.3f")
+        print(f"\n{cutoff:%Y-%m}: wrote {stem}.png and .csv")
+        print(score(fc, cutoff).to_string(index=False))
+    print(f"\nRun directory: {out_dir} (intervals from {cv_path or 'none'})")
 
 
 if __name__ == "__main__":

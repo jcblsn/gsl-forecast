@@ -206,11 +206,14 @@ explicit in the output.
 ### Hindcast from a past cutoff
 
 ```bash
-uv run --frozen gsl-hindcast 2022-03 [--models swe_regression,ets_damped_s12] [--horizon 24] [--cv outputs/.../cv_results_<stamp>.parquet] [--output-dir outputs/<today>]
+uv run --frozen gsl-hindcast 2022-03 2023-01 [--models swe_regression,ets_damped_s12] [--horizon 24] [--cv outputs/.../cv_results_<stamp>.parquet] [--output-dir <dir>]
 ```
 
-Fits the named models on data through the given month, charts their forecasts with retrospective
-q05-q95 bands, and writes a PNG and CSV under `outputs/<today>/`.
+Fits the named models on data through each given month, charts their forecasts with retrospective
+q05-q95 bands, and writes a PNG and CSV per cutoff under
+`outputs/hindcasts/<YYYY-MM-DD_HHMM>/`. Every cutoff in one command shares one run directory, and
+`run.json` in it records the cutoffs, the models, the horizon, the training start, the data
+maximum and the cross-validation file the bands came from.
 
 ### Verify issued forecasts
 
@@ -433,7 +436,7 @@ src/
     benchmark.py        # gsl-benchmark: refit peaks and inflow next to the NRCS record
     hypsometry.py       # South-arm area and volume from elevation (USGS 2023 tables)
     verify.py           # gsl-verify: score dated forecasts in forecasts/
-    hindcast.py         # gsl-hindcast: chart a past cutoff against observations
+    hindcast.py         # gsl-hindcast: chart past cutoffs against observations
     multivariate/
       regression.py     # Standardised ridge with a GCV penalty, and the fallback rule
       swe_regression.py
