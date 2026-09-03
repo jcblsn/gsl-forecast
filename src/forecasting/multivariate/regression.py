@@ -15,6 +15,9 @@ import pandas as pd
 TIME_COL = "month"
 TARGET_COL = "avg_elevation"
 ALPHA_GRID = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 3.0, 10.0, 30.0, 100.0)
+# One fit reads the rows of a single calendar month, so the record supplies about 1 row per
+# year. 4 or 5 parameters need more than the 10 rows this bar used to ask for.
+MIN_OBS = 20
 
 
 def _standardize(X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -77,18 +80,48 @@ def design(frame: pd.DataFrame, features: list[str]) -> np.ndarray:
     return np.column_stack([np.ones(len(frame)), frame[features].to_numpy(dtype=float)])
 
 
-def fallback_reason(n_complete: int, min_obs: int, features_now: bool) -> str | None:
-    """Why a fit must drop its covariates, or None when the full fit is available.
+# A feature whose standard deviation at one issue month is this small a share of its
+# standard deviation over the whole training frame is structurally absent at that month.
+NEAR_ZERO_SD_RATIO = 0.01
 
-    The rule is declared here so a degraded fit is visible instead of being a side effect of
-    a NULL check. Percent-of-median snowpack, for example, is NULL from June to September.
+
+def select_features(
+    rows: pd.DataFrame,
+    features: list[str],
+    now: pd.Series,
+    min_obs: int,
+    scale_reference: pd.DataFrame,
+) -> tuple[list[str], dict[str, str]]:
+    """The features one fit may use, and the reason it drops each of the others.
+
+    A fit drops a feature that is NULL at the cutoff, that too few training rows carry, or
+    that barely varies among those rows. Dropping one feature no longer drops the others.
+
+    The variation rule matters because features depend on the issue season. Snow water
+    equivalent is structurally 0 at an August cutoff. The standardised ridge divides by that
+    near-zero standard deviation and returns a coefficient of hundreds of feet per inch. The
+    forecast contribution stays small because the input is near 0, but the coefficient is a
+    diagnostic failure. `scale_reference` gives the same column over every month, so the
+    rule compares a season with the whole record and needs no unit-specific threshold.
     """
-    if not features_now:
-        return "a feature is NULL at the cutoff"
-    if n_complete < min_obs:
-        return f"only {n_complete} training rows carry every feature, below min_obs={min_obs}"
-    return None
+    kept, dropped = [], {}
+    for feature in features:
+        values = rows[feature]
+        n = int(values.notna().sum())
+        sd = float(values.std()) if n > 1 else 0.0
+        reference = float(scale_reference[feature].std())
+        if pd.isna(now[feature]):
+            dropped[feature] = "it is NULL at the cutoff"
+        elif n < min_obs:
+            dropped[feature] = f"only {n} training rows carry it, below min_obs={min_obs}"
+        elif not np.isfinite(sd) or sd <= NEAR_ZERO_SD_RATIO * reference:
+            dropped[feature] = "it barely varies at this issue month"
+        else:
+            kept.append(feature)
+    return kept, dropped
 
 
-def log_fallback(model: str, lead: int, reason: str) -> None:
-    logging.debug(f"{model} lead {lead}: covariates dropped because {reason}")
+def log_fallback(model: str, lead: int, dropped: dict[str, str]) -> None:
+    """Record every dropped feature, so a degraded fit is visible in the log."""
+    for feature, reason in dropped.items():
+        logging.debug(f"{model} lead {lead}: dropped {feature} because {reason}")

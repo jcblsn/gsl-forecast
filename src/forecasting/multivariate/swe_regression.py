@@ -15,13 +15,14 @@ from dateutil.relativedelta import relativedelta
 
 from ..base import Forecaster
 from .regression import (
+    MIN_OBS,
     TARGET_COL,
     TIME_COL,
     design,
-    fallback_reason,
     log_fallback,
     require_columns,
     ridge_fit,
+    select_features,
 )
 
 DEFAULT_FEATURES = ["swe_eom_gsl", "prec_wy_eom_gsl"]
@@ -31,7 +32,7 @@ class SweRegressionForecaster(Forecaster):
     def __init__(
         self,
         features: list[str] | None = None,
-        min_obs: int = 10,
+        min_obs: int = MIN_OBS,
         alpha: float | None = None,
         name: str = "swe_regression",
     ):
@@ -70,16 +71,15 @@ class SweRegressionForecaster(Forecaster):
         y = df[TARGET_COL].to_numpy()
         dy = y[idx + h] - y[idx]
         rows = df.iloc[idx]
-        ok = rows[self.features].notna().all(axis=1).to_numpy()
-        have_now = bool(last[self.features].notna().all())
-        reason = fallback_reason(int(ok.sum()), self.min_obs, have_now)
-        if reason is None:
-            cols = [TARGET_COL, *self.features]
-            beta = ridge_fit(design(rows[ok], cols), dy[ok], self.alpha)
-            return {"beta": beta, "columns": cols, "rows": rows[ok]}
-        log_fallback(self.name, h, reason)
-        beta = ridge_fit(design(rows, [TARGET_COL]), dy, self.alpha)
-        return {"beta": beta, "columns": [TARGET_COL], "rows": rows}
+        features, dropped = select_features(rows, self.features, last, self.min_obs, df)
+        ok = rows[features].notna().all(axis=1).to_numpy()
+        if features and int(ok.sum()) < self.min_obs:
+            dropped |= dict.fromkeys(features, "too few rows carry all the kept features")
+            features, ok = [], np.ones(len(rows), dtype=bool)
+        log_fallback(self.name, h, dropped)
+        cols = [TARGET_COL, *features]
+        beta = ridge_fit(design(rows[ok], cols), dy[ok], self.alpha)
+        return {"beta": beta, "columns": cols, "rows": rows[ok]}
 
     def _delta(self, h: int) -> float:
         fitted = self._horizon_fit(h)

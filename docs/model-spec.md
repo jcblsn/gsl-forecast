@@ -142,14 +142,25 @@ Four properties follow from this design.
 - The `b1 * y_i` term is a mean-reversion term. It sets how far the lake returns toward its
   own level over `h` months.
 
-The effective sample is small. Snowpack starts in 1978-10, so a cutoff in 2011 gives 32
-rows per fit and a cutoff in 2026 gives 47 rows, against 4 parameters.
+The effective sample is small. The training era starts in 1989-10, so 1 fit reads about 1 row
+per year against 4 parameters. This is the main reason the review calls the model too
+fragmented; a pooled model across issue months and leads is future work.
 
-The model uses a declared fallback rule. It drops the snowpack terms and fits
-`y_(i+h) - y_i = b0 + b1 * y_i` when either condition holds:
+The model drops 1 feature at a time under a declared rule. It drops a feature when:
 
-- Fewer than `min_obs` rows (default 10) carry every feature.
-- Any feature is NULL at the cutoff.
+- The feature is NULL at the cutoff.
+- Fewer than `min_obs` rows (default 20) carry the feature.
+- The standard deviation of the feature among those rows is 1% or less of its standard
+  deviation over the whole training frame.
+
+The last rule holds because a feature depends on the issue season. Snow water equivalent is
+structurally 0 at an August cutoff. The standardised ridge divides by that near-zero standard
+deviation and returns a coefficient of hundreds of feet per inch. The forecast contribution
+stays small because the input is near 0, but the coefficient is a diagnostic failure.
+
+The model then fits on the rows that carry every feature it kept. If fewer than `min_obs`
+rows do, it drops every feature and fits `y_(i+h) - y_i = b0 + b1 * y_i`. Before this rule a
+single missing feature dropped all of them.
 
 The registered variant `swe_head` adds `head_diff_ft`, the south arm level minus the north
 arm level. The causeway berm controls this difference, so the term carries the management

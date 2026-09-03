@@ -18,13 +18,14 @@ from dateutil.relativedelta import relativedelta
 from .. import hypsometry
 from ..base import Forecaster
 from .regression import (
+    MIN_OBS,
     TARGET_COL,
     TIME_COL,
     design,
-    fallback_reason,
     log_fallback,
     require_columns,
     ridge_fit,
+    select_features,
 )
 
 INFLOW_COL = "inflow_kaf_total"
@@ -35,7 +36,7 @@ class InflowChainForecaster(Forecaster):
     def __init__(
         self,
         snow_features: list[str] | None = None,
-        min_obs: int = 10,
+        min_obs: int = MIN_OBS,
         alpha: float | None = None,
         level_term: str = "level",
         name: str = "inflow_chain",
@@ -100,15 +101,14 @@ class InflowChainForecaster(Forecaster):
         ]
         rows = df.iloc[idx]
         target = df[INFLOW_COL].to_numpy(dtype=float)[[i + h for i in idx]]
-        ok = rows[self.snow_features].notna().all(axis=1).to_numpy() & ~np.isnan(target)
-        have_now = bool(last[self.snow_features].notna().all())
-        reason = fallback_reason(int(ok.sum()), self.min_obs, have_now)
-        if reason is None:
-            beta = ridge_fit(design(rows[ok], self.snow_features), target[ok], self.alpha)
-            x = np.concatenate([[1.0], last[self.snow_features].to_numpy(dtype=float)])
-            return max(float(x @ beta), 0.0)
-        log_fallback(self.name, h, reason)
-        return float(self._mean_inflow.get(target_month, np.nan))
+        features, dropped = select_features(rows, self.snow_features, last, self.min_obs, df)
+        ok = rows[features].notna().all(axis=1).to_numpy() & ~np.isnan(target)
+        log_fallback(self.name, h, dropped)
+        if not features or int(ok.sum()) < self.min_obs:
+            return float(self._mean_inflow.get(target_month, np.nan))
+        beta = ridge_fit(design(rows[ok], features), target[ok], self.alpha)
+        x = np.concatenate([[1.0], last[features].to_numpy(dtype=float)])
+        return max(float(x @ beta), 0.0)
 
     def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
         if not self.is_fitted:

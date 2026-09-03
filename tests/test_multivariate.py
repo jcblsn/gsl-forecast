@@ -16,7 +16,7 @@ from src.forecasting.multivariate.blend import (
     simplex_grid,
 )
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
-from src.forecasting.multivariate.regression import fallback_reason, gcv_alpha, ridge_fit
+from src.forecasting.multivariate.regression import gcv_alpha, ridge_fit, select_features
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
 
@@ -130,10 +130,42 @@ def test_gcv_picks_a_larger_penalty_for_pure_noise():
     assert gcv_alpha(*_centered(X, noise)) > gcv_alpha(*_centered(X, signal))
 
 
-def test_fallback_reason_states_the_rule():
-    assert fallback_reason(20, 10, True) is None
-    assert "NULL at the cutoff" in fallback_reason(20, 10, False)
-    assert "min_obs=10" in fallback_reason(4, 10, True)
+def _selection_frame():
+    rng = np.random.default_rng(0)
+    return pd.DataFrame(
+        {
+            "good": rng.normal(size=30),
+            "flat": np.full(30, 3.0),
+            "thin": [1.0] * 5 + [np.nan] * 25,
+            "absent": rng.normal(size=30),
+        }
+    )
+
+
+def test_select_features_keeps_the_features_that_pass():
+    rows = _selection_frame()
+    now = pd.Series({"good": 1.0, "flat": 3.0, "thin": 1.0, "absent": np.nan})
+    kept, dropped = select_features(rows, list(rows.columns), now, 10, rows)
+    assert kept == ["good"]
+    assert "NULL at the cutoff" in dropped["absent"]
+    assert "min_obs=10" in dropped["thin"]
+    assert "barely varies" in dropped["flat"]
+
+
+def test_select_features_drops_one_feature_without_dropping_the_rest():
+    """The old rule dropped every covariate when any single one was missing."""
+    rows = _selection_frame()
+    now = pd.Series({"good": 1.0, "absent": np.nan})
+    kept, dropped = select_features(rows, ["good", "absent"], now, 10, rows)
+    assert kept == ["good"] and list(dropped) == ["absent"]
+
+
+def test_select_features_compares_a_season_with_the_whole_record():
+    """SWE is structurally 0 at an August cutoff, and its ridge coefficient explodes."""
+    reference = pd.DataFrame({"swe": np.linspace(0.0, 20.0, 200)})
+    august = pd.DataFrame({"swe": np.full(30, 0.0) + np.linspace(0, 0.02, 30)})
+    kept, dropped = select_features(august, ["swe"], pd.Series({"swe": 0.01}), 10, reference)
+    assert kept == [] and "barely varies" in dropped["swe"]
 
 
 def _blend(**kw):
