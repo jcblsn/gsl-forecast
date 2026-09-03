@@ -41,7 +41,7 @@ All inputs come from live APIs. The table gives the first and last month with a 
 | `breach_kaf` | USGS 10010020 | 2008-10 | 2026-08 | None |
 | `north_arm_ft`, `head_diff_ft` | USGS 10010100 | 1966-04 | 2026-08 | None |
 | `res_kaf_total` | NRCS AWDB, 21 Reclamation stations | 1911-01 | 2026-08 | A few days |
-| `tavg_f_gsl`, `prcp_in_gsl` | NOAA nClimDiv | 1895-01 | 2026-07 | 1 month |
+| `tavg_f_gsl_lag1`, `prcp_in_gsl_lag1` | NOAA nClimDiv | 1895-02 | 2026-08 | None; the column is already shifted 1 month |
 | `nrcs_inflow_forecasts` | NRCS AWDB forecast point | 2024-01 | 2026-05 | None; January to May only |
 
 Three availability rules control which model may use which column.
@@ -49,11 +49,12 @@ Three availability rules control which model may use which column.
 1. The percent-of-median snowpack columns are NULL in June, July, August and September. The
    median of the site sum is 0 in those months, and the transform divides by NULLIF of that
    sum. A model that uses these columns has no features in the summer.
-2. The nClimDiv columns are 1 month behind at issue time. NOAA releases a month around the
+2. The nClimDiv values are 1 month behind at issue time. NOAA releases a month around the
    8th of the next month. The monthly workflow runs on the 2nd. So the cutoff month has no
    temperature or precipitation value when the forecast runs. Cross-validation reads the
-   finished table and does not see this gap. A model must use a lagged copy of these
-   columns, never the unlagged column at the cutoff.
+   finished table and does not see this gap. Therefore `monthly_covariates` holds only the
+   `_lag1` copies. The unlagged values stay in `climdiv_monthly`, which no model reads, and
+   `tests/test_leakage.py` checks that no model names one.
 3. The published NRCS inflow forecast exists for January to May of 2024, 2025 and 2026. That
    is 15 publication dates. This is too few to fit a coefficient on.
 

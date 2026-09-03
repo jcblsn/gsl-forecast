@@ -19,7 +19,8 @@ pipeline change first, and only then a feature the loop may use.
 
 ## Loop
 
-1. Read the latest experiment's metrics: `uv run gsl-results <experiment_id>`.
+1. Read the latest experiment's metrics: `uv run gsl-results <experiment_id>`. The
+   committed record of the same run is `data/results/cv_summary.csv`.
 2. Propose one change to one multivariate model (features, lags, regularisation, fallback
    rules, the stage-two step in `inflow_chain`, a new model file).
 3. Run the harness. Compare `peak_mae_feb` and `mae_h6` against the previous run and

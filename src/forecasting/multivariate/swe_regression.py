@@ -41,6 +41,9 @@ class SweRegressionForecaster(Forecaster):
         self.alpha = alpha
         self._data: pd.DataFrame | None = None
 
+    def feature_columns(self) -> list[str]:
+        return list(self.features)
+
     def fit(self, data: pd.DataFrame) -> Self:
         require_columns(data, [TIME_COL, TARGET_COL, *self.features])
         self._data = data.sort_values(TIME_COL).reset_index(drop=True)

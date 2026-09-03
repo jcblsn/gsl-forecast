@@ -48,6 +48,9 @@ class InflowChainForecaster(Forecaster):
         self._data: pd.DataFrame | None = None
         self._step: dict[int, np.ndarray] = {}
 
+    def feature_columns(self) -> list[str]:
+        return [INFLOW_COL, *self.snow_features]
+
     def fit(self, data: pd.DataFrame) -> Self:
         require_columns(data, [TIME_COL, TARGET_COL, INFLOW_COL, *self.snow_features])
         df = data.sort_values(TIME_COL).reset_index(drop=True)

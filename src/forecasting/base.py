@@ -21,3 +21,13 @@ class Forecaster(ABC):
 
     def get_metrics(self) -> dict[str, object]:
         return {}
+
+    def feature_columns(self) -> list[str]:
+        """The covariate columns the model reads, for the availability test.
+
+        A model that uses the lake record alone returns an empty list. A model that reads
+        `monthly_covariates` must name every column it reads, because
+        `tests/test_leakage.py` checks that list against the columns that exist at issue
+        time.
+        """
+        return []

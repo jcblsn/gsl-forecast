@@ -70,7 +70,7 @@ In season, the forecast to beat is the NRCS outlook. Out of season, the comparis
 - [x] Probabilistic output (q05-q95) from walk-forward errors, scored with CRPS and 90% coverage in CV
 - [x] Monthly GitHub Actions run that commits dated forecasts to `forecasts/`, plus `gsl-verify`, which scores them against the gauge as their target months arrive
 - [x] Feature store: percent-of-median snowpack, soil moisture, reservoir storage, north-arm level and breach flow, the issued NRCS inflow forecast (all from live APIs)
-- [x] Autoresearch program for the multivariate models (`docs/program.md`); loop not yet run
+- [x] Autoresearch program for the multivariate models (`docs/program.md`); one pass run, recorded in `docs/autoresearch.log`
 - [x] Bathymetry (USGS elevation-area-volume table) as `inflow_chain_area`; climate-division temperature and precipitation ingested
 - [x] One blended official model for the 24-month product (`blend`), and a public page on GitHub Pages
 - [ ] Reservoir storage and percent-of-median snowpack in the production models (via the program loop)
@@ -287,7 +287,17 @@ expt --db forecast_experiments.db best <experiment_id> --metric mae_h6 --minimiz
 expt --db forecast_experiments.db aggregate <experiment_id> --metric mae_h1
 ```
 
-CV runs log `mae_h<h>`, `rmse_h<h>`, and `mae_ratio_h<h>` (MAE divided by `naive_last` MAE at the same horizon) for every lead per model, so any horizon is directly queryable. `uv run --frozen gsl-results <experiment_id>` prints a ranked table.
+CV runs log `mae_h<h>`, `rmse_h<h>`, and `mae_ratio_h<h>` (MAE divided by `naive_last` MAE at the same horizon) for every lead per model, so any horizon is directly queryable. `uv run --frozen gsl-results <experiment_id>` prints a table of the metrics the autoresearch loop compares, ranked by `mae_h6`; `--metric` changes the rank and `--all-metrics` prints every logged lead.
+
+The tracker database is a scratchpad, and `.gitignore` excludes it. The record behind every published number is `data/results/`, which each `gsl-cv` run replaces:
+
+| File | Content |
+|---|---|
+| `cv_summary.csv` | MAE, RMSE, MAE ratio, CRPS and 90% coverage per model and lead |
+| `headline_summary.csv` | Spring-peak and water-year-end MAE per model and issue month |
+| `cv_summary.meta.json` | The run label, cutoff span, horizon, `train_start`, data vintage and git commit |
+
+`uv run --frozen gsl-results --tables` prints the markdown in [Current results](#current-results) from those files, so the published tables and the committed record cannot drift apart.
 
 ## Models
 
@@ -376,9 +386,9 @@ Everything is stored in DuckDB (`./data/gsl.db`). Every source is a live API, so
 | `reservoir_sites`, `reservoir_monthly` | NRCS AWDB (Bureau of Reclamation stations) | End-of-month storage, kaf, for the 21 reservoirs in the same units (Bear Lake from 1911, Utah Lake from 1932, Jordanelle from 1993) |
 | `usgs_discharge_daily` | USGS 10126000 (Bear), 10141000 (Weber), 10170490 (Jordan plus Surplus Canal), 10010020 (causeway breach) | Daily mean discharge, cfs |
 | `usgs_north_arm_elevation_daily` | USGS 10010100 (Saline) | Daily north-arm elevation, 1966-present |
-| `climdiv_monthly` | NOAA nClimDiv, Utah divisions 03 (North Central) and 05 (Northern Mountains) | Monthly mean temperature and precipitation, 1895-present; a month is released around the 8th of the next month, so the cutoff month is always missing at issue time. A model must read the `_lag1` copies in `monthly_covariates` |
+| `climdiv_monthly` | NOAA nClimDiv, Utah divisions 03 (North Central) and 05 (Northern Mountains) | Monthly mean temperature and precipitation, 1895-present; a month is released around the 8th of the next month, so the cutoff month is always missing at issue time. Only the `_lag1` copies reach `monthly_covariates`, so a model cannot read a value that does not exist at issue time |
 | `nrcs_inflow_forecasts` | NRCS AWDB forecast point 10010000:UT:USGS | Published Great Salt Lake inflow forecast at 10/30/50/70/90 percent exceedance and the period normal, monthly January-May since 2024 |
-| `monthly_covariates` | Derived | One row per complete month: `swe_eom_*`, `prec_wy_eom_*`, `swe_pct_median_*`, `prec_pct_median_*`, `sms_eom_*` per basin and pooled (`_gsl`) with `n_snotel_sites`; `res_kaf_*` per basin and `res_kaf_total` with `n_reservoirs`; `inflow_kaf_*` per river and `inflow_kaf_total`; `breach_kaf`; `north_arm_ft` and `head_diff_ft` (south minus north); `tavg_f_gsl` and `prcp_in_gsl`, with `tavg_f_gsl_lag1` and `prcp_in_gsl_lag1` shifted one month |
+| `monthly_covariates` | Derived | One row per complete month: `swe_eom_*`, `prec_wy_eom_*`, `swe_pct_median_*`, `prec_pct_median_*`, `sms_eom_*` per basin and pooled (`_gsl`) with `n_snotel_sites`; `res_kaf_*` per basin and `res_kaf_total` with `n_reservoirs`; `inflow_kaf_*` per river and `inflow_kaf_total`; `breach_kaf`; `north_arm_ft` and `head_diff_ft` (south minus north); `tavg_f_gsl_lag1` and `prcp_in_gsl_lag1`, the climate columns shifted one month |
 
 Snowpack at month end is the mean over sites reporting that day. The raw mean drifts as the roster grows (18 sites in 1979, 55 in 2026), which the percent-of-median columns avoid; young sites without a 30-year median count in the mean but not in the percent. Reservoir storage is summed over the stations reporting, so sums before a dam was built are smaller for a physical reason. The south-arm level is also managed at the causeway: the breach berm was raised in 2022, overtopped in 2023, and HB1001 (2025) lets the state raise it to 4,192 ft when the south arm is at or below 4,190 ft; `head_diff_ft` and `breach_kaf` carry that signal.
 

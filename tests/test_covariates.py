@@ -221,10 +221,17 @@ def test_nrcs_forecasts_one_row_per_exceedance(db):
 
 def test_climdiv_mean_of_divisions(db):
     row = db.execute(
-        "SELECT tavg_f_gsl, prcp_in_gsl FROM monthly_covariates WHERE month = DATE '2020-01-01'"
+        "SELECT AVG(tavg_f), AVG(prcp_in) FROM climdiv_monthly WHERE month = DATE '2020-01-01'"
     ).fetchone()
     assert row == (pytest.approx(30.0), pytest.approx(30.0))
     assert db.execute("SELECT COUNT(*) FROM climdiv_monthly").fetchone()[0] == 4
+
+
+def test_monthly_covariates_hides_the_unlagged_climate_columns(db):
+    """A model reads this table, and the unlagged month does not exist at issue time."""
+    columns = {r[0] for r in db.execute("DESCRIBE monthly_covariates").fetchall()}
+    assert "tavg_f_gsl" not in columns and "prcp_in_gsl" not in columns
+    assert "tavg_f_gsl_lag1" in columns and "prcp_in_gsl_lag1" in columns
 
 
 def test_climdiv_lag_columns_shift_one_month(db):

@@ -151,6 +151,14 @@ class BlendForecaster(Forecaster):
             ),
         ]
 
+    def feature_columns(self) -> list[str]:
+        """Every column the components read, so the availability test covers the blend."""
+        seen: dict[str, None] = {}
+        for _, factory in self._factories:
+            for column in factory().feature_columns():
+                seen[column] = None
+        return list(seen)
+
     def _walk_forward(self, data: pd.DataFrame) -> tuple | None:
         """Component predictions, actuals and issue seasons at every inner cutoff."""
         cutoffs = valid_cutoffs(data, self.history_years, self.horizon)

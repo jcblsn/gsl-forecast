@@ -1,8 +1,13 @@
-"""Each production model must ignore the rows after its cutoff.
+"""The harness must give each model only the rows that existed at its cutoff.
 
-A fit at a cutoff can use only the data that was available on that date. Cross-validation
-reads a complete table. Therefore a model that reads a later row gets a good score, and then
-gives a different result at issue time. This test applies to each production model.
+Two rules protect a dated forecast. First, a prediction at a cutoff must not change when a
+later row changes; cross-validation reads a finished table, so a model that reaches past its
+cutoff scores well and then gives a different answer at issue time. Second, a model must not
+read a column that has no value on the issue date, even though the finished table holds one.
+
+The first rule is tested through `evaluate_at_cutoff`, which is the function that truncates
+the frame. It receives the complete series, so a model that read a later row would change
+its prediction. The second rule is tested against `feature_columns()`.
 """
 
 import copy
@@ -13,8 +18,10 @@ import pandas as pd
 import pytest
 from dateutil.relativedelta import relativedelta
 
+from src.forecasting.cross_validate import evaluate_at_cutoff
 from src.forecasting.multivariate.blend import BlendForecaster
 from src.forecasting.registry import production_forecasters
+from src.pipeline.covariates import UNAVAILABLE_AT_ISSUE
 
 CUTOFF = pd.Timestamp("2015-03-01")
 HORIZON = 6
@@ -79,15 +86,31 @@ def _fresh(model):
 
 @pytest.mark.parametrize("factory", production_forecasters(), ids=lambda f: f.name)
 def test_predictions_ignore_rows_after_the_cutoff(series, factory):
-    train = series[series["month"] <= CUTOFF]
-    later = tampered(series)
-    honest = _fresh(factory).fit(train)
-    leaked = _fresh(factory).fit(later[later["month"] <= CUTOFF])
-    if isinstance(honest, BlendForecaster):
-        for season in honest.weights:
-            assert np.allclose(honest.weights[season], leaked.weights[season])
+    """The harness sees the complete series, so a later row must not move the forecast."""
+    honest = evaluate_at_cutoff(series, CUTOFF, [_fresh(factory)], HORIZON)
+    leaked = evaluate_at_cutoff(tampered(series), CUTOFF, [_fresh(factory)], HORIZON)
+    assert not honest.empty, f"{factory.name} produced no rows at the cutoff"
+    assert len(honest) == len(leaked)
     assert np.allclose(
-        honest.predict(HORIZON)["pred"].to_numpy(dtype=float),
-        leaked.predict(HORIZON)["pred"].to_numpy(dtype=float),
+        honest["pred"].to_numpy(dtype=float),
+        leaked["pred"].to_numpy(dtype=float),
         equal_nan=True,
     )
+
+
+def test_the_tamper_actually_changes_the_later_rows(series):
+    """Without this the test above passes on 2 identical frames, which proves nothing."""
+    later = series["month"] > CUTOFF
+    assert not series[later].equals(tampered(series)[later])
+    assert series[~later].equals(tampered(series)[~later])
+    honest = evaluate_at_cutoff(series, CUTOFF, [_fresh(production_forecasters()[0])], HORIZON)
+    leaked = evaluate_at_cutoff(
+        tampered(series), CUTOFF, [_fresh(production_forecasters()[0])], HORIZON
+    )
+    assert not np.allclose(honest["actual"].to_numpy(), leaked["actual"].to_numpy())
+
+
+@pytest.mark.parametrize("factory", production_forecasters(), ids=lambda f: f.name)
+def test_no_model_reads_a_column_that_is_absent_at_issue_time(factory):
+    forbidden = set(UNAVAILABLE_AT_ISSUE) & set(factory.feature_columns())
+    assert not forbidden, f"{factory.name} reads {sorted(forbidden)}, which is 1 month late"

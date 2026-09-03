@@ -275,6 +275,13 @@ def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
         logging.info(f"{river} ({site}): upserted {len(rows)} discharge rows from {start}")
 
 
+# The nClimDiv columns that `transform_covariates` keeps out of `monthly_covariates`. NOAA
+# releases a month around the 8th of the next month and the workflow runs on the 2nd, so the
+# cutoff month has no value at issue time. `tests/test_leakage.py` checks that no model reads
+# one of these names.
+UNAVAILABLE_AT_ISSUE = ("tavg_f_gsl", "prcp_in_gsl")
+
+
 def transform_covariates(
     conn: duckdb.DuckDBPyConnection, discharge: dict, basins: list[str]
 ) -> None:
@@ -285,8 +292,10 @@ def transform_covariates(
     sums are smaller for a physical reason). Inflow and breach flow in kaf, north-arm mean
     elevation, the south-minus-north head, and climate-division mean temperature and
     precipitation. NOAA releases a climate month around the 8th of the next month, so the
-    cutoff month has no climate value at issue time. A model must read the `_lag1` copies,
-    never the unlagged columns."""
+    cutoff month has no climate value at issue time. Therefore this table holds only the
+    `_lag1` copies of the climate columns. The unlagged values stay in `climdiv_monthly`,
+    where no model reads them, so a model cannot use a value that does not exist at issue
+    time."""
     inflow = discharge["inflow"]
     exchange = discharge.get("exchange", {})
     flow_cols = ",\n".join(
@@ -381,7 +390,7 @@ def transform_covariates(
                {total} AS inflow_kaf_total,
                r.* EXCLUDE (month),
                n.north_arm_ft, e.avg_elevation - n.north_arm_ft AS head_diff_ft,
-               c.* EXCLUDE (month), cl.* EXCLUDE (month)
+               cl.* EXCLUDE (month)
         FROM snow_wide s
         FULL OUTER JOIN flow_wide f USING (month)
         FULL OUTER JOIN res_wide r USING (month)

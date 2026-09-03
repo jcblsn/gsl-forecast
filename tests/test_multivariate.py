@@ -61,12 +61,24 @@ def test_learns_snowpack_signal(synthetic, cls):
 
 
 @pytest.mark.parametrize("cls", [SweRegressionForecaster, InflowChainForecaster])
-def test_no_leakage_from_future_rows(synthetic, cls):
+def test_fit_is_deterministic(synthetic, cls):
+    """The same rows give the same forecast. Leakage itself is tested in test_leakage.py."""
     cutoff = pd.Timestamp("2015-03-01")
     train = synthetic[synthetic["month"] <= cutoff]
     base = cls().fit(train).predict(12)["pred"].to_numpy()
     again = cls().fit(train.copy()).predict(12)["pred"].to_numpy()
     assert np.allclose(base, again)
+
+
+@pytest.mark.parametrize("cls", [SweRegressionForecaster, InflowChainForecaster])
+def test_feature_columns_names_every_covariate_the_model_reads(synthetic, cls):
+    """The availability test in test_leakage.py reads this list, so it must be complete."""
+    model = cls()
+    columns = model.feature_columns()
+    assert columns
+    stripped = synthetic.drop(columns=columns)
+    with pytest.raises((ValueError, KeyError)):
+        model.fit(stripped)
 
 
 @pytest.mark.parametrize("cls", [SweRegressionForecaster, InflowChainForecaster])

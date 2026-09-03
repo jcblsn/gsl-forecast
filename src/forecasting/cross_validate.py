@@ -18,6 +18,7 @@ from src.forecasting.headline import (
 )
 from src.forecasting.quantiles import leave_one_year_out_scores
 from src.forecasting.registry import BASELINE, all_forecasters
+from src.forecasting.results import RESULTS_DIR, git_commit, write_results
 
 
 def evaluate_at_cutoff(
@@ -91,7 +92,10 @@ def log_to_tracker(
 ) -> None:
     for forecaster in forecasters:
         run_id = tracker.start_run(exp_id)
-        tracker.log_model(run_id, forecaster.name, forecaster.get_metrics())
+        # get_metrics describes the fit at the last cutoff only, not the whole walk, so the
+        # key says so. A blend logs the weights it held at that one cutoff.
+        last_fit = {f"last_cutoff_{k}": v for k, v in forecaster.get_metrics().items()}
+        tracker.log_model(run_id, forecaster.name, last_fit)
         model_df = cv_df[cv_df["model"] == forecaster.name]
         if model_df.empty:
             tracker.end_run(run_id, success=False, error="Failed at all cutoffs during CV")
@@ -142,8 +146,14 @@ def run_cross_validation(
     output_dir: str | None = None,
     forecasters: list[Forecaster] | None = None,
     make_plots: bool = True,
+    results_dir: str | None = None,
+    path_out: str | None = None,
 ) -> pd.DataFrame:
-    """Walk-forward CV. Any argument left as None falls back to config/config.json."""
+    """Walk-forward CV. Any argument left as None falls back to config/config.json.
+
+    `results_dir` writes the committed summary files. It is None by default, so only the
+    command line writes them; a caller in a test does not touch the repository copy.
+    """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     config = load_config(config_path)
@@ -199,6 +209,31 @@ def run_cross_validation(
     cv_df.to_parquet(per_cutoff_path, index=False)
     headline.to_parquet(os.path.join(output_dir, f"headline_{stamp}.parquet"), index=False)
     logging.info(f"Saved per-cutoff results to {per_cutoff_path} (experiment {exp_id})")
+    if path_out:
+        with open(path_out, "w") as stream:
+            stream.write(per_cutoff_path + "\n")
+
+    if results_dir:
+        meta = {
+            "run_label": f"GSL_CV_{stamp}",
+            "experiment_id": int(exp_id),
+            "experiment_db": experiment_db,
+            "n_cutoffs": len(cutoffs),
+            "cutoff_policy": cutoff_desc,
+            "first_cutoff": str(cutoffs[0].date()),
+            "last_cutoff": str(cutoffs[-1].date()),
+            "history_years": history_years,
+            "horizon": horizon,
+            "train_start": train_start or "",
+            "headline_model": fc.get("headline_model"),
+            "models": sorted({f.name for f in forecasters}),
+            "data_min": tags["data_min"],
+            "data_max": tags["data_max"],
+            "git_commit": git_commit(),
+            "generated_at": pd.Timestamp.now().isoformat(timespec="seconds"),
+        }
+        write_results(summary, headline_summary, meta, results_dir)
+        logging.info(f"Wrote the committed results artifact to {results_dir}")
 
     if make_plots:
         from src.forecasting.plots import plot_cv_mae, plot_cv_ratio
@@ -232,6 +267,15 @@ def main() -> None:
     parser.add_argument(
         "--models", help="Comma-separated model names to evaluate (default: all registered)"
     )
+    parser.add_argument(
+        "--results-dir",
+        default=RESULTS_DIR,
+        help="Directory for the committed summary files (empty string to skip)",
+    )
+    parser.add_argument(
+        "--path-out",
+        help="Write the per-cutoff parquet path to this file, for the next command to read",
+    )
     args = parser.parse_args()
     forecasters = None
     if args.models:
@@ -253,6 +297,8 @@ def main() -> None:
         output_dir=args.output_dir,
         forecasters=forecasters,
         make_plots=not args.no_plots,
+        results_dir=args.results_dir or None,
+        path_out=args.path_out,
     )
 
 
