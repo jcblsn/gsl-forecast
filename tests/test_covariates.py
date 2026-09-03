@@ -227,6 +227,15 @@ def test_climdiv_mean_of_divisions(db):
     assert db.execute("SELECT COUNT(*) FROM climdiv_monthly").fetchone()[0] == 4
 
 
+def test_climdiv_lag_columns_shift_one_month(db):
+    """NOAA publishes a month around the 8th of the next month, so only the lag is safe."""
+    row = db.execute(
+        "SELECT tavg_f_gsl_lag1, prcp_in_gsl_lag1 FROM monthly_covariates "
+        "WHERE month = DATE '2020-02-01'"
+    ).fetchone()
+    assert row == (pytest.approx(30.0), pytest.approx(30.0))
+
+
 def test_climdiv_ingest_twice_replaces(db):
     climate.ingest_climdiv(db, CFG["climdiv"])
     assert db.execute("SELECT COUNT(*) FROM climdiv_monthly").fetchone()[0] == 4
