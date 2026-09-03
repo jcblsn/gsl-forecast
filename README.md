@@ -5,8 +5,8 @@ elevation. This is not yet a quality release or a validated operational product.
 
 The retrospective development record has important limits. Target observations before 1990
 have materially different temporal support. The displayed band is a nominal central 90%
-interval calibrated from retrospective marginal errors; observed aggregate coverage is about
-87–89% at the reported key leads and varies by issue season. The published line is the model's
+interval calibrated from retrospective errors, at 1 lead at a time and for the season the
+issue falls in; observed coverage is about 85–90% at the reported key leads. The published line is the model's
 point forecast and is not necessarily the interval median. There is no demonstrated advantage
 over persistence at 12–24 months; at lead 24 the published `blend` is worse than persistence.
 
@@ -60,7 +60,7 @@ The forecast and how it is scored:
 | Issue date | The first day of the month after the cutoff, and the date on the forecast |
 | Lead (`h`) | The number of months from the issue date to the month being forecast |
 | Horizon | The longest lead the forecast covers, here 24 months |
-| Interval (q05-q95) | A nominal central 90% interval calibrated from retrospective marginal errors at the same lead |
+| Interval (q05-q95) | A nominal central 90% interval calibrated from retrospective errors at the same lead and in the same issue season. It is a band at 1 lead, not a sample from a trajectory |
 | Walk-forward cross-validation | Repeat the whole procedure at many past cutoffs, using only the data available at each one, then score the results |
 | MAE | Mean absolute error, in feet |
 | Mean pinball loss | The unweighted mean of pinball losses at q05, q25, q50, q75 and q95. Lower is better |
@@ -299,9 +299,13 @@ against 1.86 ft for the best model and 2.00 ft for `blend`.
 `inflow_chain_area`, which puts lake area from the hypsometry table in place of the level,
 scores within 0.04 ft of `inflow_chain` at every lead, so the hypsometry does not yet help.
 
-The nominal central 90% interval is calibrated from retrospective marginal errors. Aggregate
-coverage is 0.87 to 0.89 at leads 6 and 12 and varies materially by issue season. The model's
-published point line is not necessarily q50. Section 7 of `docs/model-spec.md` gives the limits.
+The nominal central 90% interval is calibrated from retrospective errors, at 1 lead at a time
+and for the season the issue falls in. One band over every issue month gave the `blend` a
+coverage of 0.82 at lead 6 from an accumulation issue and 0.98 from a recession issue, both
+2.31 ft wide. The season-conditional band is 2.89 ft and 1.65 ft wide, at 0.85 and 0.85. The
+band is still marginal at each lead, so it does not give a probability for the spring maximum
+or the date of the minimum. The published point line is not necessarily q50. Section 7 of
+`docs/model-spec.md` gives the limits.
 
 ### Against the NRCS record
 

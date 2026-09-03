@@ -47,9 +47,9 @@ staleNotice = stale
 ::: {.callout-warning title="Experimental prototype"}
 This is not yet a quality release or a validated operational product. Target observations
 before 1990 have materially different temporal support. The displayed band is a nominal
-central 90% interval calibrated from retrospective marginal errors; aggregate observed
-coverage is about 87–89% at reported key leads and varies by issue season. The point line is
-not necessarily the interval median. Development results demonstrate no advantage over
+central 90% interval calibrated from retrospective errors, at 1 lead at a time and for the
+season the issue falls in; observed coverage is about 85–90% at reported key leads. The point
+line is not necessarily the interval median. Development results demonstrate no advantage over
 persistence at 12–24 months, and the prototype `blend` is worse than persistence at lead 24.
 :::
 
@@ -63,11 +63,12 @@ The forecast covers the next 24 months. The number of months ahead is the lead. 
 experimental issue goes out at the start of each month, and it uses data through the end of
 the month before. That date is the issue date.
 
-The forecast is a range, not one number. The nominal 90% interval comes from marginal errors
-in the repeatedly used retrospective development cohort. It contains about 87–89% of
-observations at the reported key leads in aggregate, with different coverage by issue season.
-It is not a guarantee that 90 of the next 100 values will fall inside. A longer lead generally
-gives a wider interval.
+The forecast is a range, not one number. The nominal 90% interval comes from the errors of
+the repeatedly used retrospective development cohort, at 1 lead at a time and for the season
+the issue falls in. It contains about 85–90% of observations at the reported key leads. It is
+not a guarantee that 90 of the next 100 values will fall inside. A longer lead generally gives
+a wider interval, and an issue in the accumulation season gives a wider interval than the same
+lead in the recession season.
 
 ## Forecast path
 
