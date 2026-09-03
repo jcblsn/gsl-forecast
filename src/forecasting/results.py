@@ -9,24 +9,71 @@ The snapshot is written by the tracker, not here, so it also carries the commit,
 state and the command line that produced the numbers.
 """
 
+import csv
+import hashlib
 import json
 import os
 
 import pandas as pd
 
+from src.forecasting.headline import (
+    APR_JUN_MONTHLY_MEAN_MAX,
+    SEPTEMBER_MONTHLY_MEAN,
+    TARGET_LABELS,
+)
+
 RESULTS_DIR = os.path.join("data", "results")
 EXPERIMENT = "experiment.json"
 METRICS = "metrics.csv"
 RUNS = "runs.csv"
+MANIFEST = "manifest.json"
 
 TABLE_LEADS = (1, 3, 6, 9, 12, 18, 24)
 INTERVAL_LEADS = (6, 12)
 HEADLINE_ROWS = (
-    ("peak", "Spring peak", ("jan", "feb", "mar", "apr", "may")),
-    ("wy_end", "Water-year end", ("jan", "apr", "jun", "jul", "aug")),
+    (
+        APR_JUN_MONTHLY_MEAN_MAX,
+        TARGET_LABELS[APR_JUN_MONTHLY_MEAN_MAX],
+        ("jan", "feb", "mar", "apr", "may"),
+    ),
+    (
+        SEPTEMBER_MONTHLY_MEAN,
+        TARGET_LABELS[SEPTEMBER_MONTHLY_MEAN],
+        ("jan", "apr", "jun", "jul", "aug"),
+    ),
 )
 
-LEAD_METRICS = ("mae", "rmse", "mae_ratio", "crps", "cov90")
+LEAD_METRICS = ("mae", "rmse", "mae_ratio", "mean_pinball_loss", "cov90")
+
+
+def _sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _numeric_values_sha256(path: str) -> tuple[int, str]:
+    with open(path, newline="") as stream:
+        values = [row["value"] for row in csv.DictReader(stream)]
+    payload = "".join(f"{value}\n" for value in values).encode()
+    return len(values), hashlib.sha256(payload).hexdigest()
+
+
+def verify_manifest(results_dir: str = RESULTS_DIR) -> dict:
+    """Verify the immutable development snapshot against its checked-in manifest."""
+    path = os.path.join(results_dir, MANIFEST)
+    with open(path) as stream:
+        manifest = json.load(stream)
+    for filename, expected in manifest["files"].items():
+        actual = _sha256(os.path.join(results_dir, filename))
+        if actual != expected["sha256"]:
+            raise ValueError(f"Frozen results hash mismatch for {filename}: {actual}")
+    count, digest = _numeric_values_sha256(os.path.join(results_dir, METRICS))
+    if count != manifest["numeric_value_count"] or digest != manifest["numeric_values_sha256"]:
+        raise ValueError("Frozen metric numeric values do not match the manifest")
+    return manifest
 
 
 def _dims(frame: pd.DataFrame) -> pd.DataFrame:
@@ -122,18 +169,18 @@ def mae_table(summary: pd.DataFrame, models: list[str], headline_model: str) -> 
 
 
 def interval_table(summary: pd.DataFrame, models: list[str]) -> str:
-    """CRPS and 90% coverage at the leads the README reports."""
-    if "crps" not in summary.columns:
+    """Mean pinball loss and 90% coverage at the leads the README reports."""
+    if "mean_pinball_loss" not in summary.columns:
         return ""
-    crps = summary.pivot(index="h", columns="model", values="crps")
+    loss = summary.pivot(index="h", columns="model", values="mean_pinball_loss")
     cov = summary.pivot(index="h", columns="model", values="cov90")
-    columns = [m for m in models if m in crps.columns]
+    columns = [m for m in models if m in loss.columns]
     lines = [_row(["Lead", *columns]), _row(["---"] * (len(columns) + 1))]
     for h in INTERVAL_LEADS:
-        if h not in crps.index:
+        if h not in loss.index:
             continue
         lines.append(
-            _row([str(h), *[f"{crps.loc[h, m]:.2f} / {cov.loc[h, m]:.2f}" for m in columns]])
+            _row([str(h), *[f"{loss.loc[h, m]:.2f} / {cov.loc[h, m]:.2f}" for m in columns]])
         )
     return "\n".join(lines)
 
@@ -169,7 +216,7 @@ def render_tables(
     models: list[str] | None = None,
     baseline: str = "naive_last",
 ) -> str:
-    """The markdown for the README section "Current results", from the committed files."""
+    """The Markdown for the README's frozen development tables."""
     columns = _order_models(summary, models, baseline)
     headline_model = meta.get("headline_model") or columns[0]
     commit = (meta.get("git_commit") or "")[:12]
@@ -186,7 +233,7 @@ def render_tables(
     ]
     intervals = interval_table(summary, columns)
     if intervals:
-        parts += ["", "CRPS and 90% coverage:", "", intervals]
+        parts += ["", "Mean pinball loss and nominal central-90% coverage:", "", intervals]
     if not headline.empty:
         parts += [
             "",

@@ -36,7 +36,7 @@ def three_component_blends() -> list[Forecaster]:
 
     `blend` is strong to lead 12 and weak past lead 18, because `swe_head` is. Each model
     below adds a component that is strong where `swe_head` is weak, and the fitted weight
-    decides where to use it.
+    decides where to use it. The experimental state-space baseline is not a blend candidate.
     """
     second = {
         "blend3_swe": (
@@ -44,7 +44,6 @@ def three_component_blends() -> list[Forecaster]:
             lambda: SweRegressionForecaster(name="swe_regression"),
         ),
         "blend3_chain": ("inflow_chain", InflowChainForecaster),
-        "blend3_state": ("state_space", StateSpaceForecaster),
     }
     return [
         BlendForecaster(components=[_swe_head(), pair, _anchor()], name=name)
@@ -98,6 +97,8 @@ PRODUCTION_MODELS = {
     "inflow_chain",
     "blend",
 }
+
+EXPERIMENTAL_MODELS = {"state_space"}
 
 
 def production_forecasters() -> list[Forecaster]:

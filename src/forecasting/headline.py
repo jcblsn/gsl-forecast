@@ -1,21 +1,29 @@
 """Headline scalars scored from walk-forward CV output.
 
-The two numbers people act on are the spring peak (April-June maximum of the monthly mean)
-and the water-year-end level (the September mean). This module extracts them from per-cutoff
-CV predictions for cutoffs that correspond to the operational issue dates: the peak from
-outlooks issued January 1 through May 1 (the NRCS schedule), the water-year end from
-January 1 through August 1, since the summer decline is the product nobody else issues.
+The two reported summaries are the maximum April-June monthly mean and the September monthly
+mean at water-year end. This module extracts them from per-cutoff CV predictions for cutoffs
+that correspond to the operational issue dates: the April-June maximum from outlooks issued
+January 1 through May 1, and the September mean from January 1 through August 1.
 """
 
 from collections.abc import Iterator
 
 import pandas as pd
 
-PEAK_MONTHS = (4, 5, 6)
-WY_END_MONTH = 9
-PEAK_ISSUES = {1: "jan", 2: "feb", 3: "mar", 4: "apr", 5: "may"}
-ISSUE_LABELS = {**PEAK_ISSUES, 6: "jun", 7: "jul", 8: "aug"}
-TARGET_ISSUES = {"peak": PEAK_ISSUES, "wy_end": ISSUE_LABELS}
+APR_JUN_MONTHS = (4, 5, 6)
+SEPTEMBER_MONTH = 9
+APR_JUN_MONTHLY_MEAN_MAX = "apr_jun_monthly_mean_max"
+SEPTEMBER_MONTHLY_MEAN = "september_monthly_mean"
+APR_JUN_ISSUES = {1: "jan", 2: "feb", 3: "mar", 4: "apr", 5: "may"}
+ISSUE_LABELS = {**APR_JUN_ISSUES, 6: "jun", 7: "jul", 8: "aug"}
+TARGET_ISSUES = {
+    APR_JUN_MONTHLY_MEAN_MAX: APR_JUN_ISSUES,
+    SEPTEMBER_MONTHLY_MEAN: ISSUE_LABELS,
+}
+TARGET_LABELS = {
+    APR_JUN_MONTHLY_MEAN_MAX: "Maximum April–June monthly mean",
+    SEPTEMBER_MONTHLY_MEAN: "September mean (water-year end)",
+}
 
 
 def issue_month(cutoff: pd.Timestamp) -> int:
@@ -45,7 +53,10 @@ def headline_scores(cv_df: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
         pred = pd.Series(grp["pred"].values, index=pd.DatetimeIndex(months))
         actual = pd.Series(grp["actual"].values, index=pd.DatetimeIndex(months))
         known = obs[(obs.index <= cutoff) & (obs.index.year == year)]
-        for target, wanted in (("peak", PEAK_MONTHS), ("wy_end", (WY_END_MONTH,))):
+        for target, wanted in (
+            (APR_JUN_MONTHLY_MEAN_MAX, APR_JUN_MONTHS),
+            (SEPTEMBER_MONTHLY_MEAN, (SEPTEMBER_MONTH,)),
+        ):
             if issue not in TARGET_ISSUES[target]:
                 continue
             sel = [pd.Timestamp(year=year, month=m, day=1) for m in wanted]
@@ -104,7 +115,7 @@ def print_headline(summary: pd.DataFrame) -> None:
         print("\nNo headline scalars scored (no January-May issue cutoffs with a full target).")
         return
     order = list(ISSUE_LABELS.values())
-    for target, title in (("peak", "Spring peak"), ("wy_end", "Water-year-end")):
+    for target, title in TARGET_LABELS.items():
         sub = summary[summary["target"] == target]
         if sub.empty:
             continue

@@ -4,8 +4,14 @@ import pandas as pd
 import pytest
 from dateutil.relativedelta import relativedelta
 
-from src.forecasting.cross_validate import evaluate_at_cutoff, summarize
-from src.forecasting.cutoffs import sample_cutoffs, valid_cutoffs
+from src.config import load_config
+from src.forecasting.cross_validate import (
+    evaluate_at_cutoff,
+    require_empty_snapshot_target,
+    resolve_evaluation_split,
+    summarize,
+)
+from src.forecasting.cutoffs import policy_cutoffs, sample_cutoffs, valid_cutoffs
 from src.forecasting.univariate.naive import NaiveForecaster
 
 
@@ -41,6 +47,34 @@ class TestCutoffs:
     def test_raises_if_not_enough_valid_cutoffs(self, monthly_data):
         with pytest.raises(ValueError, match="valid cutoffs"):
             sample_cutoffs(monthly_data, n=500, history_years=1, horizon=12)
+
+    def test_policy_cutoffs_use_exact_bounds(self, monthly_data):
+        cutoffs = policy_cutoffs(monthly_data, "2017-01-01", "2018-12-01", horizon=12)
+        assert cutoffs == list(pd.date_range("2017-01-01", "2018-12-01", freq="MS"))
+
+
+def test_default_policy_is_the_frozen_development_cohort():
+    config = load_config()
+    name, split, horizon = resolve_evaluation_split(config)
+    assert name == "development"
+    assert split["cutoff_start"] == "2011-08-01"
+    assert split["cutoff_end"] == "2024-08-01"
+    assert split["status"] == "open_development"
+    assert horizon == 24
+
+
+def test_sealed_confirmation_split_is_rejected():
+    with pytest.raises(ValueError, match="sealed"):
+        resolve_evaluation_split(load_config(), "limited_confirmation")
+
+
+def test_snapshot_target_must_be_empty(tmp_path):
+    target = tmp_path / "snapshot"
+    target.mkdir()
+    require_empty_snapshot_target(str(target))
+    (target / "existing.csv").write_text("do not replace\n")
+    with pytest.raises(ValueError, match="new, empty directory"):
+        require_empty_snapshot_target(str(target))
 
 
 class TestEvaluateAtCutoff:

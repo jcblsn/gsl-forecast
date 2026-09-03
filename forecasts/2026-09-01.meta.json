@@ -1,4 +1,12 @@
 {
+  "schema_version": 1,
+  "issue": "2026-09-01",
+  "issue_status": "experimental",
+  "forecast_version": "prototype-v0",
+  "code_commit": "f147fe154b7dd64f3310cb254d703083679c709c",
+  "code_dirty": "unknown",
+  "evaluation_policy_version": "gsl-evaluation-v1",
+  "code_provenance_note": "Retrospective classification; this artifact predates dirty-tree capture.",
   "data_max": "2026-08-01",
   "observation_count": 31,
   "n_snotel_sites": 55,

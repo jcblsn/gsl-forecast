@@ -22,10 +22,12 @@ headlineView = headline ? html`<section class="headline-band">
   <div>
     <p class="eyebrow">${formatMonth(headline.month)} monthly mean</p>
     <p class="headline-number">${formatFeet(headline.pred)}</p>
-    <p class="range">90% interval ${formatFeet(headline.q05)}–${formatFeet(headline.q95)}</p>
+    <p class="range">Nominal 90% interval ${formatFeet(headline.q05)}–${formatFeet(headline.q95)}</p>
   </div>
   <dl class="issue-facts">
     <div><dt>Issued</dt><dd>${bundle.issue}</dd></div>
+    <div><dt>Status</dt><dd>${bundle.issue_status ?? "experimental"}</dd></div>
+    <div><dt>Version</dt><dd>${bundle.forecast_version ?? "unknown"}</dd></div>
     <div><dt>Model</dt><dd>${bundle.headline_model}</dd></div>
     <div><dt>Data through</dt><dd>${status.data_max ?? "Pending"}</dd></div>
   </dl>
@@ -42,24 +44,36 @@ staleNotice = stale
   : html``
 ```
 
+::: {.callout-warning title="Experimental prototype"}
+This is not yet a quality release or a validated operational product. Target observations
+before 1990 have materially different temporal support. The displayed band is a nominal
+central 90% interval calibrated from retrospective marginal errors; aggregate observed
+coverage is about 87–89% at reported key leads and varies by issue season. The point line is
+not necessarily the interval median. Development results demonstrate no advantage over
+persistence at 12–24 months, and the prototype `blend` is worse than persistence at lead 24.
+:::
+
 ## What this page shows
 
-This page gives a monthly forecast of the water surface elevation of the Great Salt Lake.
+This page gives an experimental monthly forecast of the water surface elevation of the Great Salt Lake.
 The gauge is USGS 10010000 at Saltair, on the south arm. Elevation is in feet above sea
 level. Each value is the mean over the days of one calendar month.
 
 The forecast covers the next 24 months. The number of months ahead is the lead. A new
-forecast goes out at the start of each month, and it uses data through the end of the month
-before. That date is the issue date.
+experimental issue goes out at the start of each month, and it uses data through the end of
+the month before. That date is the issue date.
 
-The forecast is a range, not one number. The 90% interval is the range that contains the
-correct value in 90 of 100 past forecasts at the same lead. A longer lead gives a wider
-interval.
+The forecast is a range, not one number. The nominal 90% interval comes from marginal errors
+in the repeatedly used retrospective development cohort. It contains about 87–89% of
+observations at the reported key leads in aggregate, with different coverage by issue season.
+It is not a guarantee that 90 of the next 100 values will fall inside. A longer lead generally
+gives a wider interval.
 
 ## Forecast path
 
-The solid line is the record from the gauge. The coloured line is the forecast. The band is
-the 90% interval around it, and it gets wider at longer leads.
+The solid line is the record from the gauge. The coloured line is the model's point forecast,
+which is not necessarily the interval median. The band is the nominal central 90% interval
+around it, and it generally gets wider at longer leads.
 
 The dashed line marks 4,190 ft. Below that level, Utah law permits an increase to the
 causeway berm, which separates the 2 arms of the lake.
@@ -166,8 +180,9 @@ driverDetails = drivers.length ? html`<dl class="driver-values">
 ## Every model in this issue
 
 The project runs more than one model. The number at the top of this page comes from the
-headline model, and the others are the comparison for it. A simple model that repeats the
-last value is the lowest bar that a useful model must clear.
+prototype headline model, and the others are comparisons. A simple model that repeats the
+last value is the lowest bar that a useful model must clear. No model has demonstrated an
+advantage over that baseline across leads 12–24 in the current development evaluation.
 
 The table gives elevation in feet at 3, 6, 12 and 24 months after the issue date.
 

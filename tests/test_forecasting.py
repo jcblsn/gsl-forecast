@@ -305,3 +305,4 @@ class TestRegistry:
         prod = production_forecasters()
         assert prod and {f.name for f in prod} <= all_names
         assert "naive_last" in {f.name for f in prod}
+        assert "state_space" not in {f.name for f in prod}

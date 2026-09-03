@@ -13,6 +13,14 @@ from src.forecasting.run_forecast import (
 )
 
 HEADLINE = "blend"
+PROVENANCE = {
+    "schema_version": 1,
+    "issue_status": "experimental",
+    "forecast_version": "prototype-test",
+    "code_commit": "abc123",
+    "code_dirty": False,
+    "evaluation_policy_version": "test-v1",
+}
 
 
 def issued_frame():
@@ -69,7 +77,11 @@ def test_incomplete_issue_keeps_the_last_complete_bundle(tmp_path):
     latest = tmp_path / "latest.json"
     latest.write_text('{"issue": "2026-08-01"}\n')
     observed = pd.DataFrame({"month": [pd.Timestamp("2026-08-01")], "avg_elevation": [4190.0]})
-    meta = {"data_max": "2026-08-01", "problems": ["null at cutoff: ['head_diff_ft']"]}
+    meta = {
+        **PROVENANCE,
+        "data_max": "2026-08-01",
+        "problems": ["null at cutoff: ['head_diff_ft']"],
+    }
     export_site_data(str(tmp_path), issued_frame(), observed, meta, None)
     assert json.loads(latest.read_text())["issue"] == "2026-08-01"
     status = json.loads((tmp_path / "status.json").read_text())
@@ -80,7 +92,12 @@ def test_incomplete_issue_keeps_the_last_complete_bundle(tmp_path):
 def test_complete_issue_replaces_the_bundle(tmp_path):
     observed = pd.DataFrame({"month": [pd.Timestamp("2026-08-01")], "avg_elevation": [4190.0]})
     payload = explanation_payload(issued_frame(), predictions_with_contributions(), HEADLINE)
-    meta = {"data_max": "2026-08-01", "observation_count": 31, "problems": []}
+    meta = {
+        **PROVENANCE,
+        "data_max": "2026-08-01",
+        "observation_count": 31,
+        "problems": [],
+    }
     export_site_data(str(tmp_path), issued_frame(), observed, meta, payload)
     latest = json.loads((tmp_path / "latest.json").read_text())
     assert latest["issue"] == "2026-09-01"
@@ -88,6 +105,8 @@ def test_complete_issue_replaces_the_bundle(tmp_path):
     assert latest["vintage"]["observation_count"] == 31
     assert latest["inputs"]["columns"] == ["month", "avg_elevation"]
     assert latest["inputs"]["rows"][0]["avg_elevation"] == 4190.0
+    assert latest["issue_status"] == "experimental"
+    assert latest["forecast_version"] == "prototype-test"
 
 
 def _fitted_blend(season, fitted_seasons):

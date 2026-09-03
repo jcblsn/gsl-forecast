@@ -1,12 +1,11 @@
 """Print the metrics of one cross-validation run.
 
 The command has 2 modes. With an experiment id it reads the experiment tracker database,
-which is the working file for a run in progress. With `--tables` it reads the committed
-snapshot under `data/results/`, which is the record behind every published number.
+which is the working file for a run in progress. With `--tables` it reads the frozen
+development snapshot under `data/results/`.
 
 Metrics are stored with their dimensions, so a lead is data and not part of a name. Labels
-like `mae_h6` and `peak_mae_feb` exist only for display and for the command line, because
-`docs/autoresearch.log` and `docs/program.md` name the metrics that way.
+like `mae_h6` exist only for display and for the command line.
 """
 
 import argparse
@@ -14,48 +13,49 @@ import argparse
 import pandas as pd
 from experiment_tracker import ExperimentTracker
 
-from src.forecasting.results import RESULTS_DIR, read_results, render_tables
+from src.forecasting.headline import APR_JUN_MONTHLY_MEAN_MAX, SEPTEMBER_MONTHLY_MEAN
+from src.forecasting.results import RESULTS_DIR, read_results, render_tables, verify_manifest
 
 DEFAULT_METRIC = "mae_h6"
 
-# The columns the autoresearch loop compares, as (metric, dims) pairs. Every other metric
-# stays in the database and comes back with --all-metrics.
-LOOP_METRICS = (
+# The historical research view, as (metric, dims) pairs. Every other metric stays in the
+# database and comes back with --all-metrics.
+DISPLAY_METRICS = (
     ("mae", {"h": 1}),
     ("mae", {"h": 3}),
     ("mae", {"h": 6}),
     ("mae", {"h": 12}),
     ("mae", {"h": 18}),
     ("mae", {"h": 24}),
-    ("crps", {"h": 6}),
-    ("crps", {"h": 12}),
+    ("mean_pinball_loss", {"h": 6}),
+    ("mean_pinball_loss", {"h": 12}),
     ("cov90", {"h": 12}),
-    ("mae", {"target": "peak", "issue": "feb"}),
-    ("mae", {"target": "wy_end", "issue": "apr"}),
-    ("mae", {"target": "wy_end", "issue": "aug"}),
+    ("mae", {"target": APR_JUN_MONTHLY_MEAN_MAX, "issue": "feb"}),
+    ("mae", {"target": SEPTEMBER_MONTHLY_MEAN, "issue": "apr"}),
+    ("mae", {"target": SEPTEMBER_MONTHLY_MEAN, "issue": "aug"}),
 )
 
-TARGET_PREFIX = {"peak": "peak", "wy_end": "wyend"}
+TARGETS = {APR_JUN_MONTHLY_MEAN_MAX, SEPTEMBER_MONTHLY_MEAN}
 
 
 def label(metric: str, dims: dict) -> str:
-    """The display name of a metric at some dims, such as mae_h6 or peak_mae_feb."""
+    """A metric's display name, such as mae_h6 or apr_jun_monthly_mean_max_mae_feb."""
     if "h" in dims:
         return f"{metric}_h{int(dims['h'])}"
     if "target" in dims and "issue" in dims:
-        return f"{TARGET_PREFIX.get(dims['target'], dims['target'])}_{metric}_{dims['issue']}"
+        return f"{dims['target']}_{metric}_{dims['issue']}"
     return metric
 
 
 def parse_label(name: str) -> tuple[str, dict]:
     """Turn a display name back into a metric and its dims.
 
-    Warning: this is the inverse of `label` and must stay so. It exists because the loop
-    documentation and the ledger name metrics this way.
+    This is the inverse of `label` and must stay so because command-line metric selectors
+    use these flattened names.
     """
-    for target, prefix in TARGET_PREFIX.items():
-        if name.startswith(f"{prefix}_"):
-            rest = name[len(prefix) + 1 :]
+    for target in TARGETS:
+        if name.startswith(f"{target}_"):
+            rest = name[len(target) + 1 :]
             metric, _, issue = rest.rpartition("_")
             return metric, {"target": target, "issue": issue}
     metric, sep, lead = name.rpartition("_h")
@@ -81,9 +81,9 @@ def metrics_frame(tracker: ExperimentTracker, experiment_id: int) -> pd.DataFram
     return pd.DataFrame(list(rows.values()))
 
 
-def loop_columns(df: pd.DataFrame, metric: str) -> list[str]:
-    """The identity columns, the ranking metric, and the metrics the loop compares."""
-    wanted = ["run_id", "model", metric, *(label(m, d) for m, d in LOOP_METRICS)]
+def display_columns(df: pd.DataFrame, metric: str) -> list[str]:
+    """The identity columns, ranking metric, and compact default metric set."""
+    wanted = ["run_id", "model", metric, *(label(m, d) for m, d in DISPLAY_METRICS)]
     seen, out = set(), []
     for name in wanted:
         if name in df.columns and name not in seen:
@@ -121,7 +121,7 @@ def view_experiment(
         print(f"\nModels ranked by {metric}:")
     else:
         print(f"\nNo run logged {metric}; the table keeps the order of the runs:")
-    shown = metrics_df if all_metrics else metrics_df[loop_columns(metrics_df, metric)]
+    shown = metrics_df if all_metrics else metrics_df[display_columns(metrics_df, metric)]
     print(shown.round(3).to_string(index=False))
     return metrics_df
 
@@ -150,14 +150,21 @@ def main() -> None:
     parser.add_argument(
         "--tables",
         action="store_true",
-        help="Print the published markdown tables from the committed results files",
+        help="Print markdown tables from the frozen development snapshot",
     )
     parser.add_argument(
-        "--all-metrics", action="store_true", help="Print every logged metric, not the loop set"
+        "--verify-manifest",
+        action="store_true",
+        help="Verify the frozen development snapshot's SHA-256 manifest",
     )
+    parser.add_argument("--all-metrics", action="store_true", help="Print every logged metric")
     parser.add_argument("--results-dir", default=RESULTS_DIR, help="Directory of those files")
     parser.add_argument("--models", help="Comma-separated model names, in the column order")
     args = parser.parse_args()
+    if args.verify_manifest:
+        manifest = verify_manifest(args.results_dir)
+        print(f"Verified frozen snapshot: {manifest['source_run']}")
+        return
     if args.tables:
         print_tables(args.results_dir, args.models.split(",") if args.models else None)
         return

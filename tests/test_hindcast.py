@@ -30,4 +30,8 @@ def test_hindcast_frame_and_score():
     assert list(fc["h"]) == [1, 2] and fc["actual"].notna().all()
     assert (fc["q05"] <= fc["pred"]).all() and (fc["q95"] >= fc["pred"]).all()
     s = score(fc, cutoff)
-    assert s.loc[0, "model"] == "naive_last" and "peak_pred" in s.columns and "cov90" in s.columns
+    assert (
+        s.loc[0, "model"] == "naive_last"
+        and "apr_jun_monthly_mean_max_pred" in s.columns
+        and "cov90" in s.columns
+    )

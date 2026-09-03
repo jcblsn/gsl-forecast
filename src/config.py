@@ -8,8 +8,10 @@ DEFAULTS = {
         "experiment_db": "forecast_experiments.db",
         "output_dir": "./outputs",
         "headline_model": None,
-        "cv": {"history_years": 15, "cutoffs": "all"},
-    }
+        "issue_status": "experimental",
+        "forecast_version": "prototype-v0",
+        "cv": {"split": "development"},
+    },
 }
 
 

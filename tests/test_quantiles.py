@@ -49,7 +49,15 @@ def test_pinball_is_asymmetric():
 def test_scores_have_expected_shape(cv_df):
     scored = apply_intervals(cv_df, error_quantiles(cv_df), "m")
     s = probabilistic_scores(scored)
-    assert list(s.columns) == ["model", "h", "crps", "cov90"]
+    assert list(s.columns) == ["model", "h", "mean_pinball_loss", "cov90"]
+    losses = np.column_stack(
+        [
+            pinball(scored["actual"].to_numpy(), scored[f"q{q:02d}"].to_numpy(), q / 100)
+            for q in (5, 25, 50, 75, 95)
+        ]
+    )
+    assert s["mean_pinball_loss"].iloc[0] == pytest.approx(losses[scored["h"] == 1].mean())
+    assert "crps" not in s.columns
     assert (s["cov90"] >= 0.8).all()
     loyo = leave_one_year_out_scores(cv_df)
     assert set(loyo["h"]) == {1, 2}

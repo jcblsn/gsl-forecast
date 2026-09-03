@@ -13,9 +13,42 @@
     "experiment_db": "forecast_experiments.db",
     "output_dir": "./outputs",
     "headline_model": "blend",
+    "issue_status": "experimental",
+    "forecast_version": "prototype-v0",
     "cv": {
-      "history_years": 15,
-      "cutoffs": "all"
+      "split": "development"
+    }
+  },
+  "evaluation_policy": {
+    "version": "gsl-evaluation-v1",
+    "default_split": "development",
+    "splits": {
+      "development": {
+        "cutoff_start": "2011-08-01",
+        "cutoff_end": "2024-08-01",
+        "horizon": 24,
+        "status": "open_development",
+        "repeatedly_used": true,
+        "untouched_test_evidence": false,
+        "description": "Repeatedly used for model development; unsuitable as untouched test evidence."
+      },
+      "limited_confirmation": {
+        "cutoff_start": "2024-09-01",
+        "cutoff_end": "2025-08-01",
+        "maximum_horizon": 12,
+        "status": "sealed",
+        "open_once_after": "Group 3 candidate specification, code, and acceptance rules are frozen."
+      },
+      "prospective": {
+        "first_issue": "2026-09-01",
+        "cadence": "monthly",
+        "immutable": true,
+        "status": "experimental",
+        "group_results_by": [
+          "forecast_version"
+        ],
+        "tuning_rule": "Never reuse an issue to tune the forecast version that produced it."
+      }
     }
   },
   "covariates": {

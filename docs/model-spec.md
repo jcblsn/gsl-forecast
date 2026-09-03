@@ -14,16 +14,19 @@ month, so a partial month never enters the series.
 Two scalars carry the decision weight. The models do not target them directly. The scoring
 code extracts both from the monthly path.
 
-| Scalar | Definition | Issue dates scored |
-|---|---|---|
-| Spring peak | The maximum of the monthly mean over April, May and June | January 1 to May 1 |
-| Water-year end | The September monthly mean | January 1 to August 1 |
+| Identifier | Public label | Definition | Issue dates scored |
+|---|---|---|---|
+| `apr_jun_monthly_mean_max` | Maximum April–June monthly mean | The maximum of the April, May and June monthly means | January 1 to May 1 |
+| `september_monthly_mean` | September mean (water-year end) | The September monthly mean; not necessarily the seasonal or annual minimum | January 1 to August 1 |
 
 An issue date is the first day of the month after the data cutoff. An outlook issued
 February 1 uses data through January 31. This matches the NRCS schedule.
 
-The forecast horizon is 24 months. The models train on data from 1960-01-01. Before 1960 the
-daily table holds about 1 reading per month, so earlier monthly rows are single readings.
+The forecast horizon is 24 months. The models train on data from 1960-01-01. Target
+observations before 1990 have materially different temporal support from the modern record;
+before 1960 the daily table holds about 1 reading per month, so many early monthly rows are
+single readings. This limits historical comparability even when those observations are used
+for fitting.
 
 ## 2 Inputs and their dates
 
@@ -108,7 +111,8 @@ signal.
 
 ## 4 The inflow_chain model
 
-This model is a reduced-form water balance in 2 stages.
+This model is an empirical inflow-driven elevation recursion in 2 stages. It does not conserve
+storage or close a physical water balance.
 
 Stage 1 predicts the tributary inflow volume. It uses the same design as section 3, with the
 inflow volume at lead `h` as the target instead of the elevation change:
@@ -120,17 +124,18 @@ Q_(i+h) = g0 + g1 * SWE_i + g2 * PREC_i + e
 The prediction is clipped at 0. When the fit has too few rows, or a feature is NULL at the
 cutoff, the model falls back to the mean inflow for the target calendar month.
 
-Stage 2 is a monthly bucket step. For each calendar month `m` it fits, over the whole
-record:
+Stage 2 is a monthly elevation-change regression. For each calendar month `m` it fits, over
+the whole record:
 
 ```
 y_(s+1) - y_s = a_m + b_m * Q_(s+1) + c_m * S_s
 ```
 
 `S_s` is the level `y_s`, or the lake area from the USGS hypsometry in the registered
-variant `inflow_chain_area`. The `a_m` term absorbs the mean net evaporation and diversion
-for that month. The `c_m` term scales the loss with the size of the lake. Stage 2 pools all
-years, so it has about 63 rows per calendar month.
+variant `inflow_chain_area`. The `a_m` term absorbs the average effect of every omitted
+process in that calendar month. The `c_m` term gives the fitted state dependence. Neither is
+a measured evaporation, diversion or closure term. Stage 2 pools all years, so it has about
+63 rows per calendar month.
 
 The model then rolls the level forward 1 month at a time from the cutoff, and feeds each
 month the stage-1 inflow for that lead.
@@ -142,63 +147,55 @@ This design has 2 known weaknesses.
   lake to the predicted volume.
 - The recursion accumulates error. The `c_m` term damps the path, but a stage-1 error at
   lead 3 still moves every later month.
+- The state is elevation rather than conserved storage, and precipitation, evaporation,
+  diversion and causeway exchange are not explicit. Its coefficients therefore do not have
+  a physical water-balance interpretation.
 
 ## 4.1 The state_space model
 
-This model restates section 4 as a linear Gaussian state-space model. The level is a latent
-state and the gauge is an observation of it:
+This experimental model is a standard structural time-series model in storage coordinates.
+It first converts each monthly mean elevation to south-arm storage with the USGS hypsometry
+table and scales the result to million acre-feet. It then fits:
 
 ```
-level:       m_t = phi * m_(t-1) + a_(month) + b * Q_t + w_t
-observation: y_t = m_t + v_t
+x_t       = mu_t + gamma_t
+mu_t      = mu_(t-1) + beta_(t-1) + eta_t
+beta_t    = beta_(t-1) + zeta_t
+gamma_t   = -sum(gamma_(t-j), j=1..11)
 ```
 
-`Q_t` is the tributary inflow in kaf for month t, and it comes from stage 1 of section 4
-without a change. `a_month` absorbs the mean net evaporation and diversion for that calendar
-month. `phi` damps the level and takes the place of the `c_m` term. `w_t` is the process
-error and `v_t` is the measurement error. A Kalman filter gives the likelihood, and maximum
-likelihood gives the 16 parameters.
+Here `x_t` is transformed observed storage, `mu_t` is a stochastic local level, `beta_t` is
+a stochastic local slope, and `gamma_t` is deterministic 12-month seasonality. The level and
+slope disturbances are independent zero-mean Gaussian variables. The implementation uses
+exact diffuse initialization and maximum likelihood through the Kalman filter. Forecasts are
+Gaussian in storage and are transformed back to elevation through hypsometry.
 
-The form differs from section 4 in 3 ways.
+This is a coherent state-space model: the full path evolves from a shared latent level and
+slope, and its model-based variance propagates with the horizon. It is not a water-balance
+model. It has no inflow or other forcing variables, no explicit observation-error term, and
+no physical closure claim.
 
-1. The 24-month path is 1 recursion, and its variance grows at each step. So the path is
-   smooth and the interval widens with the lead, without a rule for either. Open question 1
-   asks for this.
-2. Inflow enters the state equation, not a regression on an observed value that a prediction
-   later replaces. Open question 2 names that substitution as a source of bias.
-3. One coefficient `b` covers every calendar month. A volume of water raises the lake by the
-   same amount in March and in August; what changes with the month is the evaporation, which
-   `a_month` holds. Section 4 fits a separate response for each calendar month.
+The replacement was evaluated at all 157 cutoffs in the open development cohort. These
+results are additional development evidence and are not part of the frozen snapshot in
+section 9:
 
-The inflow column enters in units of its own standard deviation. In kaf its coefficient is
-near 0.001 while a monthly term is near 0.1, and the optimizer fails a line search on that
-spread.
+| Lead | MAE (ft) | MAE / persistence | Mean pinball loss | Nominal 90% coverage |
+|---|---:|---:|---:|---:|
+| 1 | 0.170 | 0.51 | 0.054 | 0.89 |
+| 3 | 0.566 | 0.63 | 0.177 | 0.88 |
+| 6 | 1.106 | 0.83 | 0.346 | 0.88 |
+| 9 | 1.585 | 1.26 | 0.500 | 0.87 |
+| 12 | 1.971 | 1.53 | 0.649 | 0.88 |
+| 18 | 3.094 | 1.62 | 1.039 | 0.88 |
+| 24 | 3.881 | 2.16 | 1.329 | 0.88 |
 
-The state intercept needs care. statsmodels writes the transition as
-`alpha_(t+1) = c_t + T alpha_t`, so the intercept at t drives the level at t + 1. Both driver
-arrays therefore move back 1 step, and the intercept at t carries the term and the inflow
-for t + 1. Without the shift the fit puts each monthly term 1 month early, and the forecast
-reaches its peak and its trough 1 month before the record does.
-
-Result, from the run in `docs/autoresearch.log` dated 2026-09-03: the model is better than
-`inflow_chain`, the model it restates, at every lead and on the spring peak. It is worse
-than `blend` at every lead. Its CRPS at lead 12 is 0.324 ft against 0.352 ft for `blend`,
-which is the only part of the go criterion it meets.
-
-| Metric | state_space | inflow_chain | blend |
-|---|---|---|---|
-| Spring peak, February issue | 0.578 | 0.625 | 0.573 |
-| MAE lead 6 | 0.642 | 0.681 | 0.521 |
-| MAE lead 12 | 1.214 | 1.320 | 1.069 |
-| MAE lead 24 | 2.126 | 2.315 | 1.999 |
-| CRPS lead 12 | 0.324 | 0.320 | 0.352 |
-
-The registry holds the model. `PRODUCTION_MODELS` does not, because it has no
-`contributions` method for the public page.
+It trails `ets_damped_s12` at every lead and persistence after lead 7. The registry keeps it
+as a structural baseline for experiments, while `PRODUCTION_MODELS` excludes it.
 
 ## 5 The blend
 
-No model is the best model at each lead. Therefore the official model mixes 2 of them:
+No model is the best model at each lead. The current prototype headline model mixes 2 of
+them:
 
 ```
 pred(h) = w(s, h) * swe_head + (1 - w(s, h)) * ets_damped_s12
@@ -277,7 +274,7 @@ together, so one term is not the effect of a change to that input alone.
 
 ## 6 Estimation
 
-Every fit in sections 3 and 4 uses the same estimator, in
+Every direct regression fit in sections 3 and 4 uses the same estimator, in
 `src/forecasting/multivariate/regression.py`.
 
 The estimator standardises the design. It centres and scales each non-intercept column by
@@ -290,8 +287,8 @@ The estimator chooses the penalty `alpha` per fit by generalised cross-validatio
 fixed grid. GCV uses only the rows inside the fit, so no future data enters the choice. A
 caller can pass a fixed `alpha` to switch the search off.
 
-The models do not report standard errors. All published uncertainty comes from the
-walk-forward errors in section 7.
+The direct regression models do not report standard errors. The displayed prototype
+uncertainty comes from the walk-forward errors in section 7.
 
 ## 7 Uncertainty
 
@@ -299,8 +296,13 @@ The point forecast gets an empirical interval. For each model and lead, the code
 quantiles of the walk-forward errors `actual - pred` and adds them to the point forecast.
 The quantile set is 0.05, 0.25, 0.50, 0.75 and 0.95.
 
-Two scores measure the intervals: the mean pinball loss over the quantile set, which this
-project reports as CRPS, and the share of actuals inside the central 90 percent interval.
+Two scores measure the intervals: the unweighted mean pinball loss over the quantile set and
+the share of actuals inside the nominal central 90 percent interval. The loss is only the
+unweighted five-quantile mean, not an integral over the full forecast distribution.
+
+The displayed point forecast is fitted independently from this retrospective calibration.
+It is not necessarily the q50 interval value. Aggregate observed coverage is about 87–89%
+at the reported key leads, rather than 90%, and coverage varies by issue season.
 
 The scoring holds out 1 year at a time. Each cutoff takes its interval from the errors of
 other years. A cutoff late in year Y still shares target months with cutoffs early in year
@@ -308,14 +310,23 @@ Y plus 1, so scores at long leads are slightly optimistic.
 
 ## 8 Validation
 
-The harness is walk-forward cross-validation in `src/forecasting/cross_validate.py`.
+The harness is walk-forward cross-validation in `src/forecasting/cross_validate.py`. Its
+versioned policy defines three cohorts:
 
-- Cutoffs: every month end in the last 15 years that has 24 months of actuals after it. This
-  gives 157 cutoffs, from 2011-08 to 2024-08.
-- At each cutoff the harness trains every model on data from 1960 through the cutoff, then
-  predicts 24 months.
-- The harness records MAE and RMSE per model and lead, MAE relative to `naive_last`, CRPS
-  and 90 percent coverage, and the 2 headline scalars by issue month.
+- `development`: exactly 157 monthly cutoffs from 2011-08-01 through 2024-08-01, horizon 24,
+  and status `open_development`. This cohort has been consulted repeatedly and is unsuitable
+  as untouched test evidence.
+- `limited_confirmation`: monthly cutoffs from 2024-09-01 through 2025-08-01, maximum horizon
+  12, and status `sealed`. `gsl-cv` refuses to open it. It may be opened once only after a
+  candidate specification, its code and its acceptance rules are frozen.
+- `prospective`: immutable monthly issues beginning 2026-09-01. They remain experimental,
+  are grouped by forecast version, and are never reused to tune the version that produced
+  them.
+
+At each development cutoff the harness trains every model on data from 1960 through the
+cutoff, then predicts 24 months. It records the policy version and exact bounds along with
+MAE and RMSE per model and lead, MAE relative to `naive_last`, mean pinball loss, nominal
+90% coverage, and the 2 headline scalars by issue month.
 
 Two caveats apply to every number this harness produces.
 
@@ -325,14 +336,15 @@ Two caveats apply to every number this harness produces.
 2. Overlapping target months make long-lead interval scores slightly optimistic. See section
    7.
 
-## 9 Current accuracy
+## 9 Frozen development accuracy
 
-Every published number comes from one cross-validation run, `GSL_CV_20260903_0004`: 157
+The maintained retrospective tables come from one cross-validation run,
+`GSL_CV_20260903_0004`: 157
 cutoffs from 2011-08 to 2024-08, data through 2026-08. `data/results/` holds a snapshot of
-that run, and the repository keeps those files. The snapshot names the git commit that
-produced its numbers, so the run is identified by more than a date. The README section
-"Current results" holds the tables, and `gsl-results --tables` prints them from the snapshot.
-`docs/autoresearch.log` records which change produced which number.
+that run. Its manifest records the development-only status, limitations and hashes, and CI
+verifies those hashes. The README section "Frozen development results" holds the tables, and
+`gsl-results --tables` prints them from the snapshot. This repeatedly used record is not
+untouched test evidence. `docs/autoresearch.log` is a historical experiment log.
 
 The experiment tracker database is the working file for a run in progress. `.gitignore`
 excludes it, so the snapshot rather than an experiment id is the citation.
@@ -341,8 +353,8 @@ In short:
 
 - `blend` is best or equal on both headline numbers, and it holds that position through lead
   12. It is the model the page shows.
-- `swe_head` is the best model for the spring peak from a January issue, at 0.70 ft against
-  1.62 ft for a repeat of the last value.
+- `swe_head` is the best model for the maximum April–June monthly mean from a January issue,
+  at 0.70 ft against 1.62 ft for a repeat of the last value.
 - Past lead 18 `blend` loses to `blend_swe` and to `swe_regression`, because it uses
   `swe_head`, which is the weakest covariate model at long leads.
 - At lead 24 no model beats a repeat of the last value. `naive_last` is 1.79 ft, against
@@ -352,14 +364,13 @@ In short:
 ## 10 Open questions
 
 1. The forecast path is 24 independent fits, except in `state_space`. No rule makes the
-   path smooth, and no rule makes the intervals wider at longer leads. Section 4.1 gives one
-   answer, and it is better than `inflow_chain` past lead 12 but worse than `blend`
-   everywhere.
+   direct-model path smooth, and no rule makes its intervals wider at longer leads. Section
+   4.1 gives one coherent-path baseline, but it trails `ets_damped_s12` throughout the
+   development cohort.
 2. Stage 2 of `inflow_chain` fits on the observed inflow and runs on the predicted inflow.
-   A correction for errors in the variables, or one joint fit, can remove the bias in
-   section 4. Section 4.1 removes the substitution, and it does improve the long leads.
-   A sampler with a shared prior over the monthly terms is the next form, and the criterion
-   in `docs/autoresearch.log` holds it back until a Gaussian fit earns it.
+   A future physical storage model must represent forecast-inflow uncertainty, precipitation,
+   evaporation, diversion and residual closure jointly. The structural model in section 4.1
+   deliberately does not claim to solve that problem.
 3. Reservoir storage lowers accuracy as a plain extra regressor. Storage moves with the lake
    level and with the same trend, so it adds a collinear column and no new information. A
    measure of the deficit below capacity can separate the 2 signals.

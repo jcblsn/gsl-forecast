@@ -38,7 +38,20 @@ def project(tmp_path):
             "horizon": 6,
             "experiment_db": str(tmp_path / "expt.db"),
             "output_dir": str(tmp_path / "outputs"),
-            "cv": {"history_years": 3, "cutoffs": "all"},
+            "cv": {"split": "development"},
+        },
+        "evaluation_policy": {
+            "version": "test-v1",
+            "default_split": "development",
+            "splits": {
+                "development": {
+                    "cutoff_start": "2016-12-01",
+                    "cutoff_end": "2019-06-01",
+                    "horizon": 6,
+                    "status": "open_development",
+                },
+                "confirmation": {"status": "sealed", "maximum_horizon": 6},
+            },
         },
     }
     config_path = tmp_path / "config.json"
@@ -72,7 +85,11 @@ def test_cv_all_cutoffs_writes_parquet_and_tracker(project):
 
         # The run records how it was produced, so an id resolves to a vintage.
         assert exp["argv"] and exp["python"]
-        assert tracker.tags("experiment", exp["experiment_id"])["cutoff_policy"]
+        tags = tracker.tags("experiment", exp["experiment_id"])
+        assert tags["cutoff_policy"] == "development"
+        assert tags["evaluation_policy_version"] == "test-v1"
+        assert tags["policy_cutoff_start"] == "2016-12-01"
+        assert tags["policy_cutoff_end"] == "2019-06-01"
 
         # The parquet is reachable from the run, so no path file is needed.
         recorded = tracker.tags("experiment", exp["experiment_id"])["cv_parquet"]

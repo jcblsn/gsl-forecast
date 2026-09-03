@@ -1,11 +1,11 @@
-"""Reduced-form water balance: snowpack -> monthly inflow -> monthly elevation change.
+"""Inflow-driven elevation recursion: snowpack -> inflow -> elevation change.
 
 Stage one predicts each future month's tributary inflow (kaf) from the snowpack known at
-the cutoff, by calendar month and lead. Stage two is a monthly bucket step fitted on history:
+the cutoff, by calendar month and lead. Stage two is an empirical monthly recursion:
 the change in elevation from one month to the next as a function of that month's inflow and
-either the starting elevation (the default, an empirical stand-in for lake area) or, with
-`level_term="area"`, the lake area from the USGS hypsometry, so the evaporation term scales
-the way evaporation does. The elevation is then rolled forward one month at a time.
+either the starting elevation or, with `level_term="area"`, lake area from the USGS
+hypsometry. It does not conserve storage or close all inflows and outflows. The elevation is
+rolled forward one month at a time.
 """
 
 from datetime import date

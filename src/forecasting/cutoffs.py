@@ -34,3 +34,36 @@ def sample_cutoffs(
     if len(valid) < n:
         raise ValueError(f"Only {len(valid)} valid cutoffs available, requested {n}")
     return sorted(random.Random(seed).sample(valid, n))
+
+
+def policy_cutoffs(
+    data: pd.DataFrame,
+    cutoff_start: str,
+    cutoff_end: str,
+    horizon: int,
+    n: int | None = None,
+    seed: int = 42,
+) -> list[pd.Timestamp]:
+    """The fixed monthly cohort declared by an evaluation policy."""
+    start = pd.Timestamp(cutoff_start)
+    end = pd.Timestamp(cutoff_end)
+    if start > end:
+        raise ValueError(f"Evaluation cutoff start {start.date()} is after {end.date()}")
+    if horizon < 1:
+        raise ValueError("Evaluation horizon must be positive")
+
+    expected_cutoffs = pd.date_range(start, end, freq="MS")
+    required = pd.date_range(start, end + pd.DateOffset(months=horizon), freq="MS")
+    available = pd.DatetimeIndex(pd.to_datetime(data["month"]).unique())
+    missing = required.difference(available)
+    if len(missing):
+        shown = ", ".join(str(value.date()) for value in missing[:3])
+        suffix = " ..." if len(missing) > 3 else ""
+        raise ValueError(f"Evaluation policy months are absent from the data: {shown}{suffix}")
+
+    cutoffs = list(expected_cutoffs)
+    if n is None:
+        return cutoffs
+    if len(cutoffs) < n:
+        raise ValueError(f"Only {len(cutoffs)} policy cutoffs available, requested {n}")
+    return sorted(random.Random(seed).sample(cutoffs, n))

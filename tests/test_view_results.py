@@ -8,6 +8,7 @@ import pytest
 from experiment_tracker import ExperimentTracker
 
 from src.forecasting import results, view_results
+from src.forecasting.headline import APR_JUN_MONTHLY_MEAN_MAX
 
 
 @pytest.fixture
@@ -18,7 +19,10 @@ def tracker_db(tmp_path):
         for name, mae in (("swe_head", 0.51), ("naive_last", 1.33)):
             with tracker.run(exp_id, name=name, params={"last_cutoff_alpha": 0.1}) as run:
                 run.log_metrics({"mae": mae, "rmse": mae * 1.3}, dims={"h": 6})
-                run.log_metrics({"mae": mae}, dims={"target": "peak", "issue": "feb"})
+                run.log_metrics(
+                    {"mae": mae},
+                    dims={"target": APR_JUN_MONTHLY_MEAN_MAX, "issue": "feb"},
+                )
         broken = tracker.start_run(exp_id, name="broken")
         tracker.end_run(broken, success=False, error="Failed at all cutoffs during CV")
     return path, exp_id
@@ -53,16 +57,21 @@ def test_unknown_experiment_returns_none(tracker_db):
 
 
 def test_labels_round_trip_through_parse(tracker_db):
-    for metric, dims in view_results.LOOP_METRICS:
+    for metric, dims in view_results.DISPLAY_METRICS:
         name = view_results.label(metric, dims)
         assert view_results.parse_label(name) == (metric, dims)
 
 
 def test_label_names_match_the_ledger():
     assert view_results.label("mae", {"h": 6}) == "mae_h6"
-    assert view_results.label("crps", {"h": 12}) == "crps_h12"
-    assert view_results.label("mae", {"target": "peak", "issue": "feb"}) == "peak_mae_feb"
-    assert view_results.label("mae", {"target": "wy_end", "issue": "apr"}) == "wyend_mae_apr"
+    assert (
+        view_results.label("mae", {"target": "apr_jun_monthly_mean_max", "issue": "feb"})
+        == "apr_jun_monthly_mean_max_mae_feb"
+    )
+    assert (
+        view_results.label("mae", {"target": "september_monthly_mean", "issue": "apr"})
+        == "september_monthly_mean_mae_apr"
+    )
 
 
 def _snapshot(tmp_path):
@@ -90,14 +99,14 @@ def _snapshot(tmp_path):
                             "mae": mae,
                             "rmse": mae,
                             "mae_ratio": ratio,
-                            "crps": mae / 3,
+                            "mean_pinball_loss": mae / 3,
                             "cov90": 0.89,
                         },
                         dims={"h": h},
                     )
                 run.log_metrics(
                     {"mae": 0.57 if model == "blend" else 1.39, "n": 13},
-                    dims={"target": "peak", "issue": "feb"},
+                    dims={"target": APR_JUN_MONTHLY_MEAN_MAX, "issue": "feb"},
                 )
         tracker.snapshot(exp_id, directory)
     return directory
@@ -110,7 +119,15 @@ def test_read_results_pivots_the_snapshot(tmp_path):
     assert meta["run_label"] == "GSL_CV_test"
     assert meta["horizon"] == "24"
     assert len(summary) == 8 and len(headline) == 2
-    assert set(summary.columns) >= {"model", "h", "mae", "rmse", "mae_ratio", "crps", "cov90"}
+    assert set(summary.columns) >= {
+        "model",
+        "h",
+        "mae",
+        "rmse",
+        "mae_ratio",
+        "mean_pinball_loss",
+        "cov90",
+    }
     assert summary[(summary["model"] == "blend") & (summary["h"] == 6)]["mae"].iloc[0] == 0.52
 
 
@@ -125,7 +142,7 @@ def test_tables_render_from_the_committed_files(tmp_path, capsys):
     text = view_results.print_tables(directory, ["blend", "naive_last"])
     assert "| Lead | blend | naive_last | Ratio (blend) |" in text
     assert "| 6 | 0.52 | 1.36 | 0.38 |" in text
-    assert "| Spring peak | Feb 1 | 0.57 | 1.39 |" in text
+    assert "| Maximum April–June monthly mean | Feb 1 | 0.57 | 1.39 |" in text
     assert "GSL_CV_test" in capsys.readouterr().out
 
 
@@ -135,3 +152,16 @@ def test_a_snapshot_round_trips_to_the_same_numbers(tmp_path):
     at_24 = summary[(summary["model"] == "naive_last") & (summary["h"] == 24)]
     assert at_24["mae"].iloc[0] == pytest.approx(0.34 * 15)
     assert pd.api.types.is_integer_dtype(summary["h"])
+
+
+def test_frozen_development_snapshot_matches_its_manifest():
+    manifest = results.verify_manifest()
+    assert manifest["snapshot_status"] == "frozen_development_only"
+    assert manifest["source_run"] == "GSL_CV_20260903_0004"
+    assert manifest["numeric_value_count"] == 2774
+    summary, headline, _ = results.read_results()
+    assert "mean_pinball_loss" in summary and "crps" not in summary
+    assert set(headline["target"]) == {
+        "apr_jun_monthly_mean_max",
+        "september_monthly_mean",
+    }

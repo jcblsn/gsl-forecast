@@ -1,4 +1,4 @@
-"""Place our spring-peak and seasonal-inflow forecasts next to the published NRCS record."""
+"""Compare maximum April-June monthly-mean forecasts with the published NRCS record."""
 
 import argparse
 import os
@@ -9,7 +9,7 @@ import pandas as pd
 from src.config import load_config
 from src.forecasting.cross_validate import evaluate_at_cutoff
 from src.forecasting.data import load_monthly_data
-from src.forecasting.headline import ISSUE_LABELS, headline_scores
+from src.forecasting.headline import APR_JUN_MONTHLY_MEAN_MAX, ISSUE_LABELS, headline_scores
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
 from src.forecasting.registry import all_forecasters
 
@@ -37,7 +37,9 @@ def compare(
     nrcs["issue_date"] = pd.to_datetime(nrcs["issue_date"])
     nrcs["issue"] = nrcs["issue_date"].dt.month.map(ISSUE_LABELS)
     nrcs["water_year"] = nrcs["issue_date"].dt.year
-    peaks = headline[(headline["target"] == "peak") & (headline["model"] == model)]
+    peaks = headline[
+        (headline["target"] == APR_JUN_MONTHLY_MEAN_MAX) & (headline["model"] == model)
+    ]
     rows = []
     for _, r in nrcs.iterrows():
         ours = peaks[(peaks["issue"] == r["issue"]) & (peaks["water_year"] == r["water_year"])]
@@ -56,10 +58,10 @@ def compare(
             row.update(
                 {
                     "our_model": best["model"],
-                    "our_peak": round(best["pred"], 2),
-                    "actual_monthly_peak": round(best["actual"], 2),
+                    "our_apr_jun_monthly_mean_max": round(best["pred"], 2),
+                    "actual_apr_jun_monthly_mean_max": round(best["actual"], 2),
                     "our_error": round(best["pred"] - best["actual"], 2),
-                    "nrcs_error_vs_monthly": (
+                    "nrcs_error_vs_apr_jun_monthly_mean_max": (
                         round(r["implied_peak_ft"] - best["actual"], 2)
                         if pd.notna(r["implied_peak_ft"])
                         else float("nan")
@@ -74,7 +76,7 @@ def compare(
 
 
 def refit_at_issues(nrcs: pd.DataFrame, data: pd.DataFrame, train_start: str | None, model: str):
-    """Fit the model at each NRCS issue date and score its spring peak.
+    """Fit the model at each NRCS issue date and score its April-June monthly-mean maximum.
 
     Uses the data as it stands today rather than the vintage available at the time, so this
     is a hindcast of the method, not a record of what was issued.

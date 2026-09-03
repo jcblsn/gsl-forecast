@@ -9,6 +9,17 @@ import pytest
 from src.forecasting.run_forecast import export_forecasts, require_intervals
 
 
+def metadata():
+    return {
+        "schema_version": 1,
+        "issue_status": "experimental",
+        "forecast_version": "prototype-test",
+        "code_commit": "abc123",
+        "code_dirty": False,
+        "evaluation_policy_version": "test-v1",
+    }
+
+
 def cv_frame(models: list[str], horizon: int = 3) -> pd.DataFrame:
     rng = np.random.default_rng(3)
     rows = []
@@ -39,7 +50,7 @@ def test_export_writes_intervals_for_every_model(tmp_path):
     cv = tmp_path / "cv.parquet"
     cv_frame(["blend", "naive_last"]).to_parquet(cv, index=False)
     path = str(tmp_path / "2026-09-01.csv")
-    out = export_forecasts(predictions(["blend", "naive_last"]), path, str(cv))
+    out = export_forecasts(predictions(["blend", "naive_last"]), path, str(cv), metadata())
     assert os.path.exists(path)
     assert out[["q05", "q95"]].notna().all().all()
 
@@ -51,15 +62,43 @@ def test_export_refuses_when_the_cv_file_omits_a_model(tmp_path):
     cv_frame(["naive_last"]).to_parquet(cv, index=False)
     path = str(tmp_path / "2026-09-01.csv")
     with pytest.raises(SystemExit, match="No interval for \\['blend'\\]"):
-        export_forecasts(predictions(["blend", "naive_last"]), path, str(cv))
+        export_forecasts(predictions(["blend", "naive_last"]), path, str(cv), metadata())
     assert not os.path.exists(path)
 
 
 def test_export_without_a_cv_file_writes_point_forecasts(tmp_path):
     """`gsl-plot` and a hindcast use the point path, so the guard applies only with --intervals."""
     path = str(tmp_path / "2026-09-01.csv")
-    out = export_forecasts(predictions(["blend"]), path, None)
+    out = export_forecasts(predictions(["blend"]), path, None, metadata())
     assert "q05" not in out.columns and os.path.exists(path)
+
+
+def test_dated_export_is_write_once_without_partial_replacement(tmp_path):
+    path = str(tmp_path / "2026-09-01.csv")
+    export_forecasts(predictions(["blend"]), path, None, metadata())
+    before = {
+        artifact: (tmp_path / artifact).read_bytes()
+        for artifact in ("2026-09-01.csv", "2026-09-01.meta.json")
+    }
+
+    with pytest.raises(FileExistsError, match="write-once"):
+        export_forecasts(predictions(["blend"]), path, None, metadata())
+
+    assert not (tmp_path / "2026-09-01.explain.json").exists()
+    assert all(
+        (tmp_path / artifact).read_bytes() == content for artifact, content in before.items()
+    )
+
+
+@pytest.mark.parametrize("suffix", (".csv", ".meta.json", ".explain.json"))
+def test_any_existing_issue_artifact_blocks_the_whole_export(tmp_path, suffix):
+    stem = tmp_path / "2026-09-01"
+    existing = tmp_path / f"{stem.name}{suffix}"
+    existing.write_text("keep\n")
+    with pytest.raises(FileExistsError, match="write-once"):
+        export_forecasts(predictions(["blend"]), str(stem) + ".csv", None, metadata())
+    assert existing.read_text() == "keep\n"
+    assert len(list(tmp_path.iterdir())) == 1
 
 
 def test_require_intervals_names_every_model_without_one():

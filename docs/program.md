@@ -1,6 +1,11 @@
-# Autoresearch program for gsl-forecast
+# Historical autoresearch program for gsl-forecast (retired)
 
-This file is the research strategy for an agent-driven improvement loop, in the pattern of
+Status: retired. Do not run this keep/revert loop or treat its repeatedly consulted
+development results as untouched evidence. This document preserves the procedure used for
+the historical log; metric and target names such as `crps_h6`, `peak_mae_feb` and
+`wyend_mae_apr` retain their former, now-replaced terminology here only.
+
+This file records the former research strategy for an agent-driven improvement loop, in the pattern of
 karpathy/autoresearch: one editable asset, one scalar metric, one fixed harness. The loop
 fits the multivariate layer and not the univariate baselines, whose design space is too
 small to search. The data pipeline is not part of the loop: a new source is a reviewed

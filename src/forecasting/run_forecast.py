@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import tempfile
 from datetime import date
 
@@ -30,6 +31,51 @@ SAMPLE_COLUMNS = (
 )
 SAMPLE_MONTHS = 12
 MIN_OBS_DAYS = 28
+ISSUE_METADATA_SCHEMA_VERSION = 1
+ISSUE_STATUSES = {"experimental", "release"}
+SITE_PROVENANCE_FIELDS = (
+    "issue_status",
+    "forecast_version",
+    "code_commit",
+    "code_dirty",
+    "evaluation_policy_version",
+)
+
+
+def code_provenance() -> dict:
+    """The repository revision and dirty-tree state at issue time."""
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], check=True, capture_output=True, text=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("Cannot record code provenance for this forecast issue") from error
+    return {"code_commit": commit, "code_dirty": bool(status.strip())}
+
+
+def issue_metadata(config: dict, data_meta: dict) -> dict:
+    """Complete required issue provenance around the current data-vintage metadata."""
+    fc = config["forecasting"]
+    status = fc["issue_status"]
+    if status not in ISSUE_STATUSES:
+        raise ValueError(f"Unknown issue_status {status!r}; choose from {sorted(ISSUE_STATUSES)}")
+    version = fc["forecast_version"]
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("forecast_version must be a non-empty string")
+    policy = config.get("evaluation_policy")
+    if not policy or not policy.get("version"):
+        raise ValueError("Configuration does not define an evaluation policy version")
+    return {
+        **data_meta,
+        "schema_version": ISSUE_METADATA_SCHEMA_VERSION,
+        "issue_status": status,
+        "forecast_version": version,
+        **code_provenance(),
+        "evaluation_policy_version": policy["version"],
+    }
 
 
 def data_status(db_path: str) -> tuple[dict, list[str]]:
@@ -292,6 +338,19 @@ def export_forecasts(
     """Write one dated forecast file: issue month, target month, lead, model, point,
     intervals. With `meta`, the sidecar <path stem>.meta.json records the data vintage. A
     complete headline issue also writes the sidecar <path stem>.explain.json."""
+    stem = os.path.splitext(path)[0]
+    issue_paths = (path, stem + ".meta.json", stem + ".explain.json")
+    existing = [candidate for candidate in issue_paths if os.path.exists(candidate)]
+    if existing:
+        raise FileExistsError(
+            f"Forecast issue artifacts are write-once; already exists: {existing}"
+        )
+    if meta is None:
+        raise ValueError("Dated forecast export requires issue metadata")
+    missing = sorted((set(SITE_PROVENANCE_FIELDS) | {"schema_version"}) - meta.keys())
+    if missing:
+        raise ValueError(f"Issue metadata is missing {missing}")
+
     calibration = predictions.attrs.get("calibration")
     headline_model = predictions.attrs.get("headline_model")
     out = predictions.rename(columns={"model_name": "model"})[["month", "model", "pred"]].copy()
@@ -310,18 +369,19 @@ def export_forecasts(
     out["issue"] = out["issue"].dt.date
     out["month"] = out["month"].dt.date
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    out.to_csv(path, index=False, float_format="%.3f")
-    stem = os.path.splitext(path)[0]
-    if meta:
-        meta = dict(meta)
-        meta["headline"] = {
-            "available": headline_model is not None,
-            "model": headline_model,
-            "calibration": calibration,
-        }
-        write_json(stem + ".meta.json", meta)
+    payloads = [(path, out.to_csv(index=False, float_format="%.3f"))]
+    meta = dict(meta)
+    meta["issue"] = str(out["issue"].iloc[0])
+    meta["headline"] = {
+        "available": headline_model is not None,
+        "model": headline_model,
+        "calibration": calibration,
+    }
+    payloads.append((stem + ".meta.json", json.dumps(meta, indent=2) + "\n"))
     if headline_model:
-        write_json(stem + ".explain.json", explanation_payload(out, predictions, headline_model))
+        explanation = explanation_payload(out, predictions, headline_model)
+        payloads.append((stem + ".explain.json", json.dumps(explanation, indent=2) + "\n"))
+    publish_write_once(payloads)
     logging.info(f"Exported {len(out)} rows to {path}")
     return out
 
@@ -348,6 +408,29 @@ def write_json(path: str, payload: dict) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def publish_write_once(payloads: list[tuple[str, str]]) -> None:
+    """Publish prepared files atomically at each path without replacing any path."""
+    prepared = []
+    created = []
+    try:
+        for destination, content in payloads:
+            fd, temporary = tempfile.mkstemp(dir=os.path.dirname(destination) or ".", suffix=".tmp")
+            with os.fdopen(fd, "w") as stream:
+                stream.write(content)
+            prepared.append((temporary, destination))
+        for temporary, destination in prepared:
+            os.link(temporary, destination)
+            created.append(destination)
+    except Exception:
+        for destination in created:
+            os.unlink(destination)
+        raise
+    finally:
+        for temporary, _ in prepared:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
 
 def explanation_payload(
@@ -409,11 +492,15 @@ def export_site_data(
         "available": explanation is not None,
         "problems": meta.get("problems", []),
         "data_max": meta["data_max"],
+        "issue_status": meta.get("issue_status"),
+        "forecast_version": meta.get("forecast_version"),
     }
     write_json(os.path.join(data_dir, "status.json"), status)
     if explanation is None:
         return
     bundle = dict(explanation)
+    for field in SITE_PROVENANCE_FIELDS:
+        bundle[field] = meta.get(field)
     history = observed.sort_values("month").tail(120)
     bundle["observations"] = [
         {"month": _json_value(row["month"]), "elevation": float(row["avg_elevation"])}
@@ -478,6 +565,7 @@ def main() -> None:
     for p in problems:
         logging.warning(f"Issuing with incomplete data: {p}")
     meta["problems"] = problems
+    meta = issue_metadata(config, meta)
     preds = run_forecasts(
         config_path=args.config,
         horizon=args.horizon,

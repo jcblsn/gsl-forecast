@@ -1,3 +1,5 @@
+# HISTORICAL LOG: the keep/revert loop is retired, and this repeatedly used development record
+# is not untouched test evidence. Former metric and target names are preserved as recorded.
 # One line per experiment: date | model | change | peak_mae_feb | mae_h6 | crps_h6 | wyend_mae_apr | wyend_mae_aug | mae_h20 | keep
 # Harness: gsl-cv defaults (157 cutoffs 2011-08..2024-08, 24-month horizon, train from 1960). Baselines from the same run.
 # The committed record of the latest run is the snapshot in data/results/, which carries the

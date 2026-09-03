@@ -135,12 +135,13 @@ deterministic mass balance with no account of measurement error.
   a time. The relevant reported pattern is that an iterated state-space method trails a
   direct method at short leads and improves with the horizon.
 
-Takeaway, and the reason it matters here: the models in this repository are all direct. Each
-lead has its own fit, so nothing links the 24 months of a path, and the interval comes from
-past errors rather than from the model. `state_space` (section 4.1 of `docs/model-spec.md`)
-is the first iterated model here. It is better than `inflow_chain`, the recursion it
-replaces, at every lead and on the spring peak, and its CRPS at lead 12 is better than
-`blend`. Its point forecast does not yet beat `blend` at any lead.
+Takeaway, and the reason it matters here: most models in this repository are direct. Each
+lead has its own fit, so nothing links the 24 months of a path, and the displayed interval
+comes from past errors rather than from the model. The experimental `state_space` model
+(section 4.1 of `docs/model-spec.md`) is instead a structural local-trend model in storage
+coordinates. It provides a coherent iterated baseline but does not implement the Bayesian
+water balances described above and trails `ets_damped_s12` throughout the development
+cohort.
 
 ## 5. Area and volume
 
@@ -162,17 +163,28 @@ replaces, at every lead and on the spring peak, and its CRPS at lead 12 is bette
 | 4 | Moon, Lall, Kwon 2007 | 1-24 months, monthly | Lagged volume, SOI, PNA, CNP | USGS level via hypsometry, NOAA CPC indices | Improvement over univariate; magnitude not in abstract |
 | 5 | Mass-balance models (White 2015, Dunn 2025) | Any, given inflow | Streamflow, precipitation, evaporation, salinity, causeway exchange | USGS gauges, PRISM, ERA5-Land or Penman | NSE 0.99 hindcast; no forecast skill |
 
-## 8. Comparison with our current results
+## 8. Comparison with our frozen development results
 
-The README "Current results" section holds the one maintained set of numbers: walk-forward MAE by lead for the univariate and snowpack models, the spring-peak and water-year-end errors by issue month, and the refit comparison against the NRCS record. At 12 months the univariate models sit at rough parity with the published statistical work and barely beat persistence. From a January issue the snowpack models roughly halve the univariate spring-peak error.
+The README "Frozen development results" section holds the maintained retrospective numbers:
+walk-forward MAE by lead for the univariate and snowpack models, the maximum April–June
+monthly-mean and September-mean errors by issue month, and the refit comparison against the
+NRCS record. This repeatedly used cohort is development evidence, not an untouched test. At
+12 months the univariate models sit at rough parity with the published statistical work and
+barely beat persistence. From a January issue the snowpack models roughly halve the
+univariate April–June monthly-mean maximum error.
 
 ## 9. Implications for the multivariate implementation
 
 1. Priority predictor: SNOTEL SWE and accumulated precipitation for GSL-contributing sites, aggregated to a basin index (NRCS AWDB API; the NRCS GSL page lists the site set). This is what resolves the December-February cutoff problem documented in the README.
 2. Second: tributary streamflow (USGS 10126000 Bear near Corinne, 10141000 Weber near Plain City, 10171000 Jordan at 1700 S) as lagged regressors, and the CBRFC ESP or NRCS seasonal volume forecasts as forward-looking regressors available at issue time.
 3. Third, for horizons beyond 12 months: NINO4 SST and Pacific QDO index (Kaplan or ERSST via NOAA PSL), Utah Climate Division precipitation, and the DeRose 2014 tree-ring dGSL reconstruction. Expect small gains; the literature shows about 1 ft over 8 years.
-4. Structure: a water-balance skeleton (level change = f(inflow, precipitation, evaporation) through hypsometry) with statistically forecast inflow will likely beat a free-form regression, because the process models show level is deterministic given inflow. Evaporation can be approximated by a seasonal climatology at first (Strike Team average 2.7 Maf/yr). Implemented twice: `inflow_chain` as a deterministic recursion and `state_space` as a filter (section 4.1 above). Neither beats the direct regression at short leads, which is where the peak is decided.
-5. Evaluation: keep the walk-forward harness, but add a spring-peak metric (June level from Dec-Mar cutoffs) so results are comparable to NRCS, and report errors with and without 2022-2023.
+4. Structure: a water-balance skeleton (storage change from inflow, precipitation,
+   evaporation, diversion and exchange through hypsometry) remains a candidate. The current
+   `inflow_chain` is an empirical elevation recursion, and `state_space` is an unforced
+   structural storage baseline; neither closes that balance.
+5. Evaluation: use the frozen date-based development cohort and the precisely named maximum
+   April–June monthly mean. Keep it distinct from the NRCS daily-peak target and reserve the
+   sealed confirmation cohort for a frozen candidate and acceptance rule.
 6. Caution from Zhu et al. (2022) and our own naive_last results: for slowly varying lakes persistence is a strong baseline at short horizons; any multivariate model must be scored against naive_last at every horizon, as the harness already does.
 
 ## 10. Papers still worth retrieving in full
@@ -186,6 +198,7 @@ The README "Current results" section holds the one maintained set of numbers: wa
 
 ## 11. Where this project can add value
 
-- The NRCS outlook stops in May, so no operational product forecasts the water-year-end (autumn) low, which is where salinity and brine-shrimp stress peak and what the Strike Team and Commissioner's statements target.
+- The NRCS outlook stops in May, so no operational product forecasts the September mean
+  (water-year end). September is not necessarily the seasonal or annual low.
 - Nothing dated and versioned exists between the spring outlook (1-6 months) and the 30-year scenario models. A 6-24 month probabilistic elevation forecast that combines NRCS or CBRFC inflow exceedances with an explicit water-balance evaporation term, runs year-round, and is scored against the USGS gauge would be the first of its kind rather than merely competitive.
 - Policy thresholds are all in south-arm elevation (4,198 ft healthy minimum, 4,192 ft serious adverse effects, 4,188.5 ft 2022 record low), so elevation stays the primary target and area and volume remain lookups.

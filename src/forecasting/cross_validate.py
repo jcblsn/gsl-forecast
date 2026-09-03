@@ -8,7 +8,7 @@ from experiment_tracker import ExperimentTracker
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
-from src.forecasting.cutoffs import sample_cutoffs
+from src.forecasting.cutoffs import policy_cutoffs
 from src.forecasting.data import load_monthly_data
 from src.forecasting.headline import (
     headline_metrics,
@@ -18,7 +18,40 @@ from src.forecasting.headline import (
 )
 from src.forecasting.quantiles import leave_one_year_out_scores
 from src.forecasting.registry import BASELINE, all_forecasters
-from src.forecasting.results import RESULTS_DIR
+
+
+def resolve_evaluation_split(
+    config: dict, split_name: str | None = None, horizon: int | None = None
+) -> tuple[str, dict, int]:
+    """Resolve one open, date-bounded CV split from the versioned policy."""
+    policy = config.get("evaluation_policy")
+    if not policy:
+        raise ValueError("Configuration does not define evaluation_policy")
+    name = split_name or config["forecasting"]["cv"].get("split") or policy["default_split"]
+    splits = policy["splits"]
+    if name not in splits:
+        raise ValueError(f"Unknown evaluation split {name!r}; choose from {sorted(splits)}")
+    split = splits[name]
+    if split.get("status") == "sealed":
+        raise ValueError(f"Evaluation split {name!r} is sealed and cannot be opened by gsl-cv")
+    if split.get("status") != "open_development":
+        raise ValueError(f"Evaluation split {name!r} is not an open development split")
+    required = {"cutoff_start", "cutoff_end", "horizon"}
+    missing = sorted(required - split.keys())
+    if missing:
+        raise ValueError(f"Evaluation split {name!r} is missing {missing}")
+    policy_horizon = int(split["horizon"])
+    if horizon is not None and horizon != policy_horizon:
+        raise ValueError(f"Evaluation split {name!r} fixes horizon={policy_horizon}; got {horizon}")
+    return name, split, policy_horizon
+
+
+def require_empty_snapshot_target(results_dir: str) -> None:
+    """Refuse to replace any existing snapshot file."""
+    if not os.path.exists(results_dir):
+        return
+    if not os.path.isdir(results_dir) or os.listdir(results_dir):
+        raise ValueError(f"Results snapshot target must be a new, empty directory: {results_dir}")
 
 
 def evaluate_at_cutoff(
@@ -119,8 +152,8 @@ def log_to_tracker(
                     "rmse": float(row["rmse"]),
                     "mae_ratio": float(row["mae_ratio"]),
                 }
-                if "crps" in row and pd.notna(row["crps"]):
-                    values["crps"] = float(row["crps"])
+                if "mean_pinball_loss" in row and pd.notna(row["mean_pinball_loss"]):
+                    values["mean_pinball_loss"] = float(row["mean_pinball_loss"])
                     values["cov90"] = float(row["cov90"])
                 run.log_metrics(values, dims={"h": int(h)})
             if headline_summary is not None:
@@ -133,11 +166,11 @@ def print_summary(summary: pd.DataFrame, horizon: int) -> None:
     pivot.columns = [f"h={c}" for c in pivot.columns]
     print("\nMean absolute error (ft) by model and horizon:")
     print(pivot.to_string())
-    if "crps" in summary.columns:
-        crps = summary.pivot(index="model", columns="h", values="crps").round(3)
-        crps.columns = [f"h={c}" for c in crps.columns]
-        print("\nCRPS (ft, leave-one-year-out empirical intervals) by model and horizon:")
-        print(crps.to_string())
+    if "mean_pinball_loss" in summary.columns:
+        loss = summary.pivot(index="model", columns="h", values="mean_pinball_loss").round(3)
+        loss.columns = [f"h={c}" for c in loss.columns]
+        print("\nMean pinball loss (ft, five quantiles) by model and horizon:")
+        print(loss.to_string())
     print("\nBest model at each horizon (MAE ratio to naive_last in parentheses):")
     for h in range(1, horizon + 1):
         best = summary[summary["h"] == h].sort_values("mae").iloc[0]
@@ -148,7 +181,6 @@ def run_cross_validation(
     config_path: str | None = None,
     n_cutoffs: int | None = None,
     horizon: int | None = None,
-    history_years: int | None = None,
     train_start: str | None = None,
     experiment_db: str | None = None,
     seed: int = 42,
@@ -156,28 +188,37 @@ def run_cross_validation(
     forecasters: list[Forecaster] | None = None,
     make_plots: bool = True,
     results_dir: str | None = None,
+    split: str | None = None,
 ) -> pd.DataFrame:
-    """Walk-forward CV. Any argument left as None falls back to config/config.json.
+    """Walk-forward CV over a named, date-bounded development cohort.
 
-    `results_dir` writes the committed summary files. It is None by default, so only the
-    command line writes them; a caller in a test does not touch the repository copy.
+    `results_dir` is opt-in and must name a new or empty directory.
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     config = load_config(config_path)
     fc = config["forecasting"]
-    horizon = horizon or fc["horizon"]
-    history_years = history_years or fc["cv"]["history_years"]
+    split_name, evaluation_split, horizon = resolve_evaluation_split(config, split, horizon)
     train_start = train_start or fc["train_start"]
     experiment_db = experiment_db or fc["experiment_db"]
     output_dir = output_dir or fc["output_dir"]
-    if n_cutoffs is None and fc["cv"]["cutoffs"] != "all":
-        n_cutoffs = int(fc["cv"]["cutoffs"])
+    if results_dir:
+        require_empty_snapshot_target(results_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     data = load_monthly_data(config["database"]["path"])
-    cutoffs = sample_cutoffs(data, n_cutoffs, history_years, horizon, seed)
-    logging.info(f"{len(cutoffs)} cutoffs from {cutoffs[0].date()} to {cutoffs[-1].date()}")
+    cutoffs = policy_cutoffs(
+        data,
+        evaluation_split["cutoff_start"],
+        evaluation_split["cutoff_end"],
+        horizon,
+        n_cutoffs,
+        seed,
+    )
+    logging.info(
+        f"{len(cutoffs)} cutoffs from split {split_name!r}: "
+        f"{cutoffs[0].date()} to {cutoffs[-1].date()}"
+    )
     if train_start:
         logging.info(f"Training data restricted to {train_start} onward")
 
@@ -194,23 +235,27 @@ def run_cross_validation(
     summary = summary.merge(prob, on=["model", "h"], how="left")
 
     stamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
-    cutoff_desc = "all month-end" if n_cutoffs is None else f"{n_cutoffs} random"
+    cutoff_desc = split_name if n_cutoffs is None else f"{n_cutoffs} sampled from {split_name}"
     tracker = ExperimentTracker(experiment_db)
     # The tracker records the commit, the tree state and the command line by itself. The tags
     # below are the things it cannot know: the data vintage and the cutoff policy.
     exp_id = tracker.experiment(
         f"GSL_CV_{stamp}",
         f"Walk-forward CV: {len(cutoffs)} cutoffs ({cutoff_desc}), {horizon}-month horizon, "
-        f"last {history_years} years, training from {train_start or 'series start'}",
+        f"training from {train_start or 'series start'}",
         tags={
             "data_min": str(data["month"].min().date()),
             "data_max": str(data["month"].max().date()),
             "n_months_available": len(data),
             "n_cutoffs": len(cutoffs),
             "cutoff_policy": cutoff_desc,
+            "evaluation_policy_version": config["evaluation_policy"]["version"],
+            "evaluation_split": split_name,
+            "evaluation_split_status": evaluation_split["status"],
+            "policy_cutoff_start": evaluation_split["cutoff_start"],
+            "policy_cutoff_end": evaluation_split["cutoff_end"],
             "first_cutoff": str(cutoffs[0].date()),
             "last_cutoff": str(cutoffs[-1].date()),
-            "history_years": history_years,
             "horizon": horizon,
             "train_start": train_start or "",
             "headline_model": fc.get("headline_model") or "",
@@ -235,7 +280,7 @@ def run_cross_validation(
     if make_plots:
         from src.forecasting.plots import plot_cv_mae, plot_cv_ratio
 
-        subtitle = f"{len(cutoffs)} {cutoff_desc} cutoffs, last {history_years} years"
+        subtitle = f"{len(cutoffs)} cutoffs from {cutoff_desc}"
         plot_cv_mae(summary, os.path.join(output_dir, "gsl_cv_mae.png"), subtitle)
         plot_cv_ratio(summary, os.path.join(output_dir, "gsl_cv_ratio.png"), subtitle)
         logging.info(f"Saved CV plots to {output_dir}")
@@ -252,10 +297,10 @@ def main() -> None:
         "--n-cutoffs",
         type=int,
         default=None,
-        help="Random sample of cutoffs; omit to use every month-end cutoff (config default)",
+        help="Seeded sample from the named split; omit to use its complete fixed cohort",
     )
-    parser.add_argument("--horizon", type=int, help="Forecast horizon in months")
-    parser.add_argument("--history-years", type=int, help="Years back to draw cutoffs from")
+    parser.add_argument("--horizon", type=int, help="Must equal the named split's fixed horizon")
+    parser.add_argument("--split", help="Named evaluation split (default: configured development)")
     parser.add_argument("--train-start", help="Earliest training date, e.g. 1960-01-01")
     parser.add_argument("--experiment-db", help="Path to experiment database")
     parser.add_argument("--seed", type=int, default=42)
@@ -266,17 +311,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--results-dir",
-        default=RESULTS_DIR,
-        help="Directory for the committed summary files (empty string to skip)",
+        help="Opt-in snapshot target; must be a new or empty directory",
     )
     args = parser.parse_args()
     forecasters = None
-    results_dir = args.results_dir or None
-    if args.models and results_dir:
-        # A run over a subset is an experiment, not the published set, so it must not
-        # replace the committed record of the full run.
-        logging.info("--models given, so this run does not write the results artifact")
-        results_dir = None
     if args.models:
         wanted = set(args.models.split(","))
         forecasters = [f for f in all_forecasters() if f.name in wanted]
@@ -285,19 +323,22 @@ def main() -> None:
             parser.error(f"Unknown models: {sorted(unknown)}")
         if BASELINE not in wanted:
             forecasters.append(next(f for f in all_forecasters() if f.name == BASELINE))
-    run_cross_validation(
-        config_path=args.config,
-        n_cutoffs=args.n_cutoffs,
-        horizon=args.horizon,
-        history_years=args.history_years,
-        train_start=args.train_start,
-        experiment_db=args.experiment_db,
-        seed=args.seed,
-        output_dir=args.output_dir,
-        forecasters=forecasters,
-        make_plots=not args.no_plots,
-        results_dir=results_dir,
-    )
+    try:
+        run_cross_validation(
+            config_path=args.config,
+            n_cutoffs=args.n_cutoffs,
+            horizon=args.horizon,
+            train_start=args.train_start,
+            experiment_db=args.experiment_db,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            forecasters=forecasters,
+            make_plots=not args.no_plots,
+            results_dir=args.results_dir,
+            split=args.split,
+        )
+    except ValueError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":

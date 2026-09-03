@@ -2,8 +2,7 @@
 
 Point forecasters get intervals from their own walk-forward errors: for each horizon the
 quantiles of past (actual - pred) are added to the point forecast. Scoring uses pinball loss
-averaged over the quantile set (a discrete CRPS) and the empirical coverage of the central
-90% interval.
+averaged over the quantile set and the empirical coverage of the nominal central 90% interval.
 """
 
 import numpy as np
@@ -40,18 +39,18 @@ def pinball(actual: np.ndarray, pred_q: np.ndarray, q: float) -> np.ndarray:
 
 
 def probabilistic_scores(scored: pd.DataFrame, quantiles=QUANTILES) -> pd.DataFrame:
-    """Mean pinball loss across quantiles (CRPS proxy) and 90% coverage, per model and h."""
+    """Mean pinball loss across quantiles and central-90% coverage, per model and lead."""
     losses = np.column_stack(
         [pinball(scored["actual"].to_numpy(), scored[qcol(q)].to_numpy(), q) for q in quantiles]
     )
     frame = scored[["model", "h"]].copy()
-    frame["crps"] = losses.mean(axis=1)
+    frame["mean_pinball_loss"] = losses.mean(axis=1)
     frame["in90"] = (scored["actual"] >= scored[qcol(0.05)]) & (
         scored["actual"] <= scored[qcol(0.95)]
     )
     return (
         frame.groupby(["model", "h"])
-        .agg(crps=("crps", "mean"), cov90=("in90", "mean"))
+        .agg(mean_pinball_loss=("mean_pinball_loss", "mean"), cov90=("in90", "mean"))
         .reset_index()
     )
 

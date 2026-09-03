@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "snapshot_status": "frozen_development_only",
+  "evaluation_policy_version": "gsl-evaluation-v1",
+  "evaluation_split": "development",
+  "source_run": "GSL_CV_20260903_0004",
+  "source_commit": "4b86efd0d32f195e6aa61ec81bd6c873fd8fe872",
+  "source_note": "Converted from the earlier summary format; metric values were copied rather than recomputed.",
+  "limitations": [
+    "This repeatedly used development cohort is unsuitable as untouched test evidence.",
+    "The snapshot does not contain row-level predictions, so its summary metrics cannot be recomputed from this directory.",
+    "Historical cross-validation uses revised data rather than issue-vintage inputs.",
+    "Pre-1990 target observations have materially different temporal support."
+  ],
+  "numeric_value_count": 2774,
+  "numeric_values_sha256": "c3d89ad1b6f008ab889fed17c35e6bf5aca7f0bd2dd380369d506c892c69794f",
+  "files": {
+    "experiment.json": {
+      "sha256": "9a969f7ad999b7f31a2fa5ef7917033ec4d8927d580a94bcb9a8cde9cd7a96cd"
+    },
+    "metrics.csv": {
+      "sha256": "0cd86b6cfb3e29548c5754d633b313d0d4d2f2f96051f009b48af619d9142c59"
+    },
+    "runs.csv": {
+      "sha256": "ed9676c3bee2cb6e3ff74006116bd77af8af8ae7050c37a277faada04243ce92"
+    }
+  }
+}

@@ -35,12 +35,14 @@ inputTable = inputs.rows.length ? Inputs.table(inputs.rows, {
 
 ## Public record
 
-The project keeps every forecast it has issued. A forecast is never changed after the date
-on it, so a reader can compare it against the gauge later.
+The project keeps every experimental forecast it has issued. Dated forecast files and their
+sidecars are write-once, so a reader can compare them against the gauge later.
 
 Each forecast stores its numbers, its interval, the weights the model fitted, the range of
 dates it was fitted on, the state of the data on the issue date, and the contribution of
-each input.
+each input. Required metadata also records the issue status, forecast version, code commit,
+dirty-tree state and evaluation-policy version. Verification rejects missing or malformed
+metadata and keeps results separate by issue status, forecast version, model and lead.
 
 - [Dated forecasts](https://github.com/jcblsn/gsl-forecast/tree/main/forecasts)
 - [Model source](https://github.com/jcblsn/gsl-forecast/tree/main/src/forecasting)

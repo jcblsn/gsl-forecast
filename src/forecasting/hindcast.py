@@ -29,13 +29,12 @@ COLORS = {
     "inflow_chain": "#1baf7a",
 }
 
-# A variant takes the colour of the model it varies, and its own line type. A family is then
-# 1 hue with 1 line type for each member, which needs no further colour separation. This is
-# how `state_space` sits next to `inflow_chain`: the same water balance in another form.
+# A variant takes the colour of the closest comparison and its own line type. A family is
+# then 1 hue with 1 line type for each member, which needs no further colour separation.
 VARIANT_OF = {
     "blend_swe": ("blend", "dashed"),
     "inflow_chain_area": ("inflow_chain", "dashed"),
-    "state_space": ("inflow_chain", "dotted"),
+    "state_space": ("ets_damped_s12", "dotted"),
 }
 
 
@@ -101,7 +100,8 @@ def score(fc: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
         }
         s = g[spring.loc[g.index]]
         if not s.empty:
-            row["peak_pred"], row["peak_obs"] = s["pred"].max(), s["actual"].max()
+            row["apr_jun_monthly_mean_max_pred"] = s["pred"].max()
+            row["apr_jun_monthly_mean_max_obs"] = s["actual"].max()
         # After the concat every row holds a q05 column, and it is NULL for a model that the
         # cross-validation file does not cover. A comparison against NULL is false, so an
         # absent interval used to read as 0.00 coverage rather than as no interval.

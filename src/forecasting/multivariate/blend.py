@@ -1,4 +1,4 @@
-"""The official model. It mixes component models with fitted weights.
+"""The prototype headline model. It mixes component models with fitted weights.
 
 Snowpack controls the lake level for the next 6 to 12 months. It gives no information about
 the winter after next. Therefore the best model changes with the forecast lead.
