@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: forecast
@@ -34,6 +36,10 @@ jobs:
           uv run --frozen gsl-forecast --allow-incomplete \
             --export forecasts/$(date -u +%Y-%m).csv --intervals "$cv"
       - run: uv run --frozen gsl-verify
+      - run: uv run --frozen gsl-site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
       - name: Commit dated forecast
         run: |
           git config user.name "github-actions[bot]"
@@ -41,3 +47,13 @@ jobs:
           git add forecasts
           git diff --cached --quiet || git commit -m "Forecast issued $(date -u +%Y-%m-%d)"
           git push
+
+  publish:
+    needs: forecast
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

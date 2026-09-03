@@ -35,8 +35,8 @@ The benchmark to beat in season is the NRCS outlook; out of season the benchmark
 - [x] Feature store: percent-of-median snowpack, soil moisture, reservoir storage, north-arm level and breach flow, the issued NRCS inflow forecast (all from live APIs)
 - [x] Autoresearch program for the multivariate models (`docs/program.md`); loop not yet run
 - [x] Bathymetry (USGS elevation-area-volume table) as `inflow_chain_area`; climate-division temperature and precipitation ingested
+- [x] One blended official model for the 24-month product (`blend`), and a generated page on GitHub Pages
 - [ ] Reservoir storage and percent-of-median snowpack in the production models (via the program loop)
-- [ ] One blended official model for the 24-month product
 
 ## Overview
 
@@ -116,6 +116,22 @@ uv run gsl-verify [--forecast-dir forecasts]
 ```
 
 Joins every dated forecast in `forecasts/` to the observed monthly means and writes MAE, bias and 90% coverage by model and lead to `forecasts/verification.csv`. This is the live skill record.
+
+### Build the public page
+
+```bash
+uv run gsl-site [--forecast-dir forecasts] [--output site/index.html] [--history-years 12] [--model blend]
+```
+
+Builds one self-contained HTML page from the newest dated file in `forecasts/`: the headline
+spring peak and water-year-end level, an inline SVG fan chart against the observed record,
+every model in the issue, the live verification table, the data vintage, and the model
+specification. The monthly workflow builds the page after `gsl-verify` and deploys it to
+GitHub Pages. `site/` is gitignored, since the page is rebuilt on every run.
+
+The September 2026 issue has no `.meta.json` sidecar, because the export predates that
+feature. The issued record is append-only, so the file is not backfilled and the page says
+the vintage is unknown for that issue.
 
 ### Plot forecasts
 
@@ -212,6 +228,7 @@ CV runs log `mae_h<h>`, `rmse_h<h>`, and `mae_ratio_h<h>` (MAE divided by `naive
 | `inflow_chain` | Snowpack predicts each future month's tributary inflow; a fitted monthly bucket step (change as a function of that month's inflow and the starting level) rolls the elevation forward |
 | `swe_head` | `swe_regression` plus the south-minus-north head difference; the best spring-peak model from January and February issues in CV, worse beyond lead 15 |
 | `inflow_chain_area` | The same with lake area from the USGS hypsometry in place of the level, so the evaporation term scales with area |
+| `blend` | The official model: `w(h)` on `swe_regression` and `1 - w(h)` on `ets_damped_s12`, with `w(h)` fitted by a walk-forward pass inside the training data and forced to fall with the lead |
 
 All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(df)`, `predict(h)`, and `get_metrics()`. The single list of models is `all_forecasters()` in `src/forecasting/registry.py`; `production_forecasters()` is the subset written by `gsl-forecast`.
 
@@ -240,15 +257,19 @@ src/
     verify.py           # gsl-verify: score dated forecasts in forecasts/
     hindcast.py         # gsl-hindcast: chart a past cutoff against observations
     multivariate/
-      regression.py     # Ridge helper and column checks
+      regression.py     # Standardised ridge with a GCV penalty, and the fallback rule
       swe_regression.py
       inflow_chain.py
+      blend.py          # The official model: a per-lead mix of swe_regression and ets_damped_s12
     univariate/
       naive.py
       moving_average.py
       drift.py
       exponential_smoothing.py
       theta.py
+  site/
+    build.py            # gsl-site: the public page from the newest issued forecast
+    chart.py            # Inline SVG fan chart, theme aware, no plotting library
 config/
   config.json           # Site IDs, AWDB station sets, DB path, modelling defaults
 tests/                  # One file per module; in-memory DuckDB and fake HTTP responses
@@ -256,6 +277,7 @@ data/
   benchmarks/nrcs_outlooks.csv   # Published NRCS outlooks vs actual peaks, 2024-2026
   external/gsl_south_arm_hypsometry.csv  # USGS 2023 elevation-area-volume table, 0.1 ft steps
 forecasts/              # Dated forecast CSVs and meta sidecars committed by the monthly workflow
+site/                   # gitignored: the generated public page
 docs/                   # Model spec, surveys, literature review, and the autoresearch program
 outputs/                # gitignored: CV parquet and PNGs
 ```
