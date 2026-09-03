@@ -14,13 +14,41 @@ from src.forecasting.data import load_monthly_data
 from src.forecasting.quantiles import apply_intervals, error_quantiles
 from src.forecasting.registry import all_forecasters
 
-DEFAULT_MODELS = ("swe_regression", "ets_damped_s12")
+DEFAULT_MODELS = ("blend", "swe_head", "ets_damped_s12", "naive_last")
+
+# One fixed colour for each model, so a chart that drops a series does not recolour the
+# others. The 6 values are the categorical palette subset that passes the all-pairs colour
+# separation checks; the excluded orange collides with the red under deuteranopia. A model
+# outside this table stops the run, because a shared colour makes 2 series look like 1.
 COLORS = {
+    "blend": "#e34948",
+    "swe_head": "#008300",
     "swe_regression": "#2a78d6",
-    "inflow_chain": "#1baf7a",
-    "ets_damped_s12": "#eb6834",
+    "ets_damped_s12": "#4a3aa7",
     "naive_last": "#eda100",
+    "inflow_chain": "#1baf7a",
 }
+
+# A variant takes the colour of the model it varies, and a dashed line. The pair is then 1
+# hue with 2 line styles, which needs no further colour separation.
+VARIANT_OF = {
+    "blend_swe": "blend",
+    "inflow_chain_area": "inflow_chain",
+}
+
+
+def model_style(models: list[str]) -> tuple[dict, dict]:
+    """The colour and the line type for each model. Unknown models stop the run."""
+    unknown = [m for m in models if m not in COLORS and m not in VARIANT_OF]
+    if unknown:
+        raise SystemExit(
+            f"No colour for {', '.join(unknown)}. The chart gives each model its own colour, "
+            f"so add one to COLORS in {__name__}, or select from: "
+            f"{', '.join(sorted(set(COLORS) | set(VARIANT_OF)))}"
+        )
+    colors = {m: COLORS[VARIANT_OF.get(m, m)] for m in models}
+    linetypes = {m: ("dashed" if m in VARIANT_OF else "solid") for m in models}
+    return colors, linetypes
 
 
 def hindcast_frame(
@@ -86,6 +114,7 @@ def plot(fc: pd.DataFrame, data: pd.DataFrame, cutoff: pd.Timestamp, path: str) 
         labs,
         scale_color_manual,
         scale_fill_manual,
+        scale_linetype_manual,
         theme,
         theme_minimal,
     )
@@ -95,7 +124,8 @@ def plot(fc: pd.DataFrame, data: pd.DataFrame, cutoff: pd.Timestamp, path: str) 
         (data["month"] >= cutoff - pd.DateOffset(years=5))
         & (data["month"] <= cutoff + pd.DateOffset(months=horizon))
     ]
-    colors = {m: COLORS.get(m, "#8a887f") for m in fc["model"].unique()}
+    models = list(fc["model"].unique())
+    colors, linetypes = model_style(models)
     top = max(obs["avg_elevation"].max(), fc["q95"].max() if "q95" in fc else 0)
     note = f"cutoff: data through {cutoff:%b %Y}"
     swe = data.loc[data["month"] == cutoff, "swe_eom_gsl"] if "swe_eom_gsl" in data else []
@@ -109,9 +139,10 @@ def plot(fc: pd.DataFrame, data: pd.DataFrame, cutoff: pd.Timestamp, path: str) 
         + geom_vline(xintercept=cutoff, linetype="dotted", color="#8a887f")
         + annotate("text", x=cutoff, y=top, label=note, ha="right", size=9, color="#8a887f")
         + geom_line(obs, aes("month", "avg_elevation"), color="#151512", size=1)
-        + geom_line(fc, aes("month", "pred", color="model"), size=1)
+        + geom_line(fc, aes("month", "pred", color="model", linetype="model"), size=1)
         + scale_color_manual(values=colors)
         + scale_fill_manual(values=colors)
+        + scale_linetype_manual(values=linetypes)
         + labs(
             title=f"Hindcast from {cutoff:%B %Y}: {horizon}-month forecasts against observations",
             x="",

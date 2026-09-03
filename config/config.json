@@ -12,6 +12,7 @@
     "horizon": 24,
     "experiment_db": "forecast_experiments.db",
     "output_dir": "./outputs",
+    "headline_model": "blend",
     "cv": {
       "history_years": 15,
       "cutoffs": "all"

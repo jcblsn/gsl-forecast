@@ -131,7 +131,7 @@ def test_data_status_flags_thin_month_and_null_covariates(project):
 
     meta, problems = data_status(project["db_path"])
     assert meta["data_max"] == "2019-12-01" and meta["observation_count"] == 30
-    assert problems == ["null at cutoff: ['swe_eom_gsl', 'prec_wy_eom_gsl']"]
+    assert problems == ["null at cutoff: ['swe_eom_gsl', 'prec_wy_eom_gsl', 'head_diff_ft']"]
     with duckdb.connect(project["db_path"]) as conn:
         conn.execute(
             "UPDATE monthly_elevation SET observation_count = 3 WHERE month = '2019-12-01'"

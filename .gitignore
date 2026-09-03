@@ -32,3 +32,4 @@ ENV/
 dist/
 build/
 *.egg-info/
+/site/_site/

@@ -1,0 +1,208 @@
+---
+title: Great Salt Lake Forecast
+title-block-style: none
+---
+
+```{ojs}
+//| echo: false
+bundle = FileAttachment("data/latest.json").json()
+status = FileAttachment("data/status.json").json()
+targets = bundle.targets ?? []
+headline = targets[0]
+formatMonth = (value) => value ? new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {month: "long", year: "numeric"}) : "Pending"
+formatFeet = (value) => Number.isFinite(value) ? `${value.toFixed(2)} ft` : "Not available"
+formatValue = (value) => Number.isFinite(value) ? value.toFixed(3) : "Not used"
+formatContribution = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(3)} ft` : "Not available"
+stale = status.attempted_issue && bundle.issue && status.attempted_issue !== bundle.issue
+```
+
+```{ojs}
+//| echo: false
+headlineView = headline ? html`<section class="headline-band">
+  <div>
+    <p class="eyebrow">${formatMonth(headline.month)} monthly mean</p>
+    <p class="headline-number">${formatFeet(headline.pred)}</p>
+    <p class="range">90% interval ${formatFeet(headline.q05)}–${formatFeet(headline.q95)}</p>
+  </div>
+  <dl class="issue-facts">
+    <div><dt>Issued</dt><dd>${bundle.issue}</dd></div>
+    <div><dt>Model</dt><dd>${bundle.headline_model}</dd></div>
+    <div><dt>Data through</dt><dd>${status.data_max ?? "Pending"}</dd></div>
+  </dl>
+</section>` : html`<section class="headline-band pending">
+  <div><p class="eyebrow">Next monthly mean</p><p class="headline-number">Pending</p>
+  <p class="range">The first complete headline issue has not run.</p></div>
+</section>`
+```
+
+```{ojs}
+//| echo: false
+staleNotice = stale
+  ? html`<div class="data-notice" role="status">The latest run had incomplete inputs. This page keeps the complete ${bundle.issue} issue.</div>`
+  : html``
+```
+
+## What this page shows
+
+This page gives a monthly forecast of the water surface elevation of the Great Salt Lake.
+The gauge is USGS 10010000 at Saltair, on the south arm. Elevation is in feet above sea
+level. Each value is the mean over the days of one calendar month.
+
+The forecast covers the next 24 months. The number of months ahead is the lead. A new
+forecast goes out at the start of each month, and it uses data through the end of the month
+before. That date is the issue date.
+
+The forecast is a range, not one number. The 90% interval is the range that contains the
+correct value in 90 of 100 past forecasts at the same lead. A longer lead gives a wider
+interval.
+
+## Forecast path
+
+The solid line is the record from the gauge. The coloured line is the forecast. The band is
+the 90% interval around it, and it gets wider at longer leads.
+
+The dashed line marks 4,190 ft. Below that level, Utah law permits an increase to the
+causeway berm, which separates the 2 arms of the lake.
+
+```{ojs}
+//| echo: false
+history = (bundle.observations ?? []).map(d => ({...d, month: new Date(`${d.month}T00:00:00`)}))
+path = targets.map(d => ({...d, month: new Date(`${d.month}T00:00:00`)}))
+forecastPlot = path.length ? Plot.plot({
+  height: 410,
+  marginLeft: 62,
+  marginBottom: 44,
+  x: {label: null, grid: false},
+  y: {label: "Elevation (ft)", grid: true},
+  marks: [
+    Plot.areaY(path, {x: "month", y1: "q05", y2: "q95", fill: "#98c9cb", fillOpacity: 0.42}),
+    Plot.lineY(history, {x: "month", y: "elevation", stroke: "#202a27", strokeWidth: 2}),
+    Plot.lineY(path, {x: "month", y: "pred", stroke: "#087f8c", strokeWidth: 3}),
+    Plot.dot(path.slice(0, 1), {x: "month", y: "pred", fill: "#c84a3d", r: 5}),
+    Plot.ruleY([4190], {stroke: "#c49a27", strokeDasharray: "5,4"}),
+    Plot.text([{month: history[0]?.month ?? path[0].month, y: 4190}], {x: "month", y: "y", text: ["4,190 ft"], fill: "#c49a27", dy: -8, textAnchor: "start", fontSize: 11})
+  ]
+}) : html`<p class="empty-state">Forecast data will appear after the next complete run.</p>`
+```
+
+## What moves the forecast
+
+The model adds up a small number of terms to get each forecast. This chart shows those
+terms for the target month you select.
+
+The reference path is the forecast for an average year. Each bar is the amount that one
+input adds to, or removes from, the reference path. An input adds to the forecast when its
+current value is above its historical average, and removes from the forecast when it is
+below. The reference path and the bars add to the forecast.
+
+The bars show how the model works. They do not show cause and effect. The inputs move
+together, so no single bar is the result of a change to that input alone.
+
+The inputs are:
+
+- Current lake level: the elevation in the last complete month.
+- Snow water equivalent: the depth of water held in the mountain snowpack, in inches. It is
+  the earliest measure of how much water will reach the lake in the spring.
+- Precipitation so far this water year: rain and snow at the same mountain sites since
+  October 1, in inches.
+- Difference between the 2 arms: the level of the south arm minus the level of the north
+  arm. A railway causeway divides the lake, and the state manages the gap in it, so this
+  number records that decision.
+
+```{ojs}
+//| echo: false
+targetOptions = targets.length ? targets.map(d => ({label: formatMonth(d.month), value: d.h})) : [{label: "Pending", value: 1}]
+viewof selectedH = Inputs.select(targetOptions, {label: "Target month", format: d => d.label, value: targetOptions[0]})
+selectedLead = selectedH.value
+selected = targets.find(d => d.h === selectedLead)
+labels = ({
+  avg_elevation: "Current lake level",
+  swe_eom_gsl: "Snow water equivalent",
+  prec_wy_eom_gsl: "Precipitation so far this water year",
+  head_diff_ft: "Difference between the 2 arms"
+})
+drivers = (selected?.contributions ?? [])
+  .filter(d => d.input !== "reference_path")
+  .map(d => ({...d, label: labels[d.input] ?? d.input}))
+reference = (selected?.contributions ?? []).find(d => d.input === "reference_path")
+```
+
+```{ojs}
+//| echo: false
+driverSummary = selected ? html`<div class="target-summary">
+  <span><strong>${formatFeet(selected.pred)}</strong> forecast</span>
+  <span><strong>${Math.round((selected.snow_weight ?? 0) * 100)}%</strong> from the snowpack model</span>
+  <span><strong>${formatFeet(reference?.contribution_ft)}</strong> reference path</span>
+</div>` : html``
+```
+
+```{ojs}
+//| echo: false
+driverPlot = drivers.length ? Plot.plot({
+  height: 260,
+  marginLeft: 170,
+  marginBottom: 42,
+  x: {label: "Contribution to elevation (ft)", grid: true},
+  y: {label: null, domain: drivers.map(d => d.label)},
+  color: {domain: ["Lower", "Raise"], range: ["#c84a3d", "#087f8c"], legend: true},
+  marks: [
+    Plot.barX(drivers, {x: "contribution_ft", y: "label", fill: d => d.contribution_ft < 0 ? "Lower" : "Raise", tip: true}),
+    Plot.ruleX([0], {stroke: "#202a27"})
+  ]
+}) : html`<p class="empty-state">Input contributions will appear with the first complete issue.</p>`
+```
+
+```{ojs}
+//| echo: false
+driverDetails = drivers.length ? html`<dl class="driver-values">
+  ${drivers.map(d => html`<div>
+    <dt>${d.label}</dt>
+    <dd class="driver-contribution">${formatContribution(d.contribution_ft)}</dd>
+    <dd>Input ${formatValue(d.value)}; historical mean ${formatValue(d.reference)}</dd>
+  </div>`)}
+</dl>` : html``
+```
+
+## Every model in this issue
+
+The project runs more than one model. The number at the top of this page comes from the
+headline model, and the others are the comparison for it. A simple model that repeats the
+last value is the lowest bar that a useful model must clear.
+
+The table gives elevation in feet at 3, 6, 12 and 24 months after the issue date.
+
+```{ojs}
+//| echo: false
+modelLeads = [3, 6, 12, 24]
+modelRows = d3.groups(bundle.models ?? [], d => d.model)
+  .map(([model, rows]) => ({model, ...Object.fromEntries(rows.map(r => [`h${r.h}`, r.pred]))}))
+  .sort((a, b) => d3.ascending(a.model, b.model))
+modelTable = modelRows.length ? Inputs.table(modelRows, {
+  columns: ["model", ...modelLeads.map(h => `h${h}`)],
+  header: Object.fromEntries([["model", "Model"], ...modelLeads.map(h => [`h${h}`, `${h} mo`])]),
+  format: Object.fromEntries(modelLeads.map(h => [`h${h}`, v => Number.isFinite(v) ? v.toFixed(2) : "—"])),
+  rows: 20
+}) : html`<p class="empty-state compact">Model comparison appears with the first complete issue.</p>`
+```
+
+## Data vintage
+
+The forecast is only as current as its inputs. This table gives the state of the data on the
+issue date.
+
+
+```{ojs}
+//| echo: false
+vintage = bundle.vintage ?? {}
+vintageView = html`<dl class="driver-values">
+  <div><dt>Last complete month</dt><dd>${vintage.data_max ?? "Pending"}</dd></div>
+  <div><dt>Daily gauge readings in it</dt><dd>${vintage.observation_count ?? "Pending"}</dd></div>
+  <div><dt>SNOTEL sites reporting</dt><dd>${vintage.n_snotel_sites ?? "Pending"}</dd></div>
+  <div><dt>Covariates missing at the cutoff</dt><dd>${(vintage.missing_covariates ?? []).length ? vintage.missing_covariates.join(", ") : "none"}</dd></div>
+</dl>`
+```
+
+<div class="method-link">
+[Read the model specification](methodology.qmd) for the equations, the source and the
+release date of each input, the test procedure, and what the numbers do not show.
+</div>

@@ -1,0 +1,1060 @@
+{
+  "schema_version": 2,
+  "issue": "2026-09-01",
+  "headline_model": "blend",
+  "calibration": {
+    "algorithm_version": 2,
+    "model": "blend",
+    "components": [
+      "swe_head",
+      "ets_damped_s12"
+    ],
+    "objective": "walk-forward MAE inside the training data",
+    "weight_step": 0.01,
+    "constraint": "nonincreasing by lead",
+    "issue_season": "recession",
+    "n_weight_cutoffs": 157,
+    "weights": {
+      "accumulation": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.98,
+        0.98,
+        0.98,
+        0.98,
+        0.95,
+        0.86,
+        0.86,
+        0.81,
+        0.61,
+        0.46,
+        0.44,
+        0.42,
+        0.36,
+        0.35,
+        0.31,
+        0.29
+      ],
+      "melt": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.72,
+        0.37,
+        0.34,
+        0.34,
+        0.34,
+        0.34,
+        0.32,
+        0.3,
+        0.24,
+        0.2,
+        0.14
+      ],
+      "recession": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.91,
+        0.73,
+        0.45,
+        0.35,
+        0.22,
+        0.16,
+        0.16,
+        0.1,
+        0.09,
+        0.09,
+        0.09,
+        0.03,
+        0.03,
+        0.03,
+        0.03,
+        0.02
+      ]
+    }
+  },
+  "targets": [
+    {
+      "month": "2026-09-01",
+      "h": 1,
+      "pred": 4189.87665113249,
+      "q05": 4189.621987372737,
+      "q95": 4190.172847353844,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4197.926259488586
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -8.050235414296118
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.0011182692428713347
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.0035206954421529574
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": 0.00302948440081121
+        }
+      ]
+    },
+    {
+      "month": "2026-10-01",
+      "h": 2,
+      "pred": 4189.625450079109,
+      "q05": 4189.191342511332,
+      "q95": 4190.113235963053,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4197.716345681229
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -8.035513032611375
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.005175115422221099
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.060940295017265875
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": 0.0003826100864778157
+        }
+      ]
+    },
+    {
+      "month": "2026-11-01",
+      "h": 3,
+      "pred": 4189.602816413556,
+      "q05": 4188.911585832728,
+      "q95": 4190.339415572151,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4197.729050656581
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -8.054119858212632
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.004715102595511192
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.0628404382105256
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.013989049198509277
+        }
+      ]
+    },
+    {
+      "month": "2026-12-01",
+      "h": 4,
+      "pred": 4189.703171330751,
+      "q05": 4188.898968452113,
+      "q95": 4190.678691199435,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4197.86605080225
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -8.045151275207262
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.007862160384332068
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.1129805408289131
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.01260981584795998
+        }
+      ]
+    },
+    {
+      "month": "2027-01-01",
+      "h": 5,
+      "pred": 4189.956219670778,
+      "q05": 4189.035382536801,
+      "q95": 4191.036003956619,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4198.111253726621
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -8.008024847973216
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.009850131507854491
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.13843397651910083
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.01842536285769221
+        }
+      ]
+    },
+    {
+      "month": "2027-02-01",
+      "h": 6,
+      "pred": 4190.276401280251,
+      "q05": 4189.165103007808,
+      "q95": 4191.390651910222,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4198.40725713232
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -7.932018543819227
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.0105948550712162
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.1630903725939369
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.046341790728378546
+        }
+      ]
+    },
+    {
+      "month": "2027-03-01",
+      "h": 7,
+      "pred": 4190.658206878854,
+      "q05": 4189.366674005069,
+      "q95": 4191.962547896466,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4198.773709456234
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -7.8870405406255095
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.014574234274951837
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.14165197412831365
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.10138429690136856
+        }
+      ]
+    },
+    {
+      "month": "2027-04-01",
+      "h": 8,
+      "pred": 4190.936425745571,
+      "q05": 4189.450505954305,
+      "q95": 4192.421112963765,
+      "snow_weight": 1.0,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4199.051125817264
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -7.820838154924321
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.017844564381494864
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.15433796245698397
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.15736851869379617
+        }
+      ]
+    },
+    {
+      "month": "2027-05-01",
+      "h": 9,
+      "pred": 4191.070780524101,
+      "q05": 4189.513593731937,
+      "q95": 4192.793162707448,
+      "snow_weight": 0.91,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4198.4676975058455
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -7.155501102596905
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.016410846372529486
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.11303399625720019
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.14479272926334638
+        }
+      ]
+    },
+    {
+      "month": "2027-06-01",
+      "h": 10,
+      "pred": 4191.016106474083,
+      "q05": 4189.253596198926,
+      "q95": 4193.13468984376,
+      "snow_weight": 0.73,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4196.973493706054
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -5.742693501294178
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.01601400992042101
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.09671292804049951
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.1339948125565914
+        }
+      ]
+    },
+    {
+      "month": "2027-07-01",
+      "h": 11,
+      "pred": 4190.5793335052185,
+      "q05": 4188.658320273571,
+      "q95": 4192.799223869795,
+      "snow_weight": 0.45,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4194.269077824043
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -3.5536191174037923
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.011662456501497548
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.0614583224987854
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.08632933542389427
+        }
+      ]
+    },
+    {
+      "month": "2027-08-01",
+      "h": 12,
+      "pred": 4190.004053590477,
+      "q05": 4188.06369352824,
+      "q95": 4192.478186164281,
+      "snow_weight": 0.35,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4192.8837447016485
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.371218920244,
+          "contribution_ft": -2.7767094255428963
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.183306177587244e-05,
+          "contribution_ft": 0.009950424404183995
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.24873902801809,
+          "contribution_ft": -0.04652937748795032
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9113980661784111,
+          "contribution_ft": -0.06640273254452586
+        }
+      ]
+    },
+    {
+      "month": "2027-09-01",
+      "h": 13,
+      "pred": 4189.58997761355,
+      "q05": 4187.558772544227,
+      "q95": 4192.651174149692,
+      "snow_weight": 0.22,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4191.409310628853
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -1.7841004915585814
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.0038285950899055597
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.016711580688654335
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.022349538145353762
+        }
+      ]
+    },
+    {
+      "month": "2027-10-01",
+      "h": 14,
+      "pred": 4189.376043146114,
+      "q05": 4187.291020472706,
+      "q95": 4192.8513694073445,
+      "snow_weight": 0.16,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.697429919198
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -1.2947120402516625
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.0030732709709516844
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.012156590587323067
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.017591413216184557
+        }
+      ]
+    },
+    {
+      "month": "2027-11-01",
+      "h": 15,
+      "pred": 4189.382348181869,
+      "q05": 4187.148136785627,
+      "q95": 4193.090070937123,
+      "snow_weight": 0.16,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.714985888493
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -1.2857852065218223
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.00585590899415939
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.019813907283351757
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.03289450181309638
+        }
+      ]
+    },
+    {
+      "month": "2027-12-01",
+      "h": 16,
+      "pred": 4189.527918622536,
+      "q05": 4186.832125953739,
+      "q95": 4193.236965491561,
+      "snow_weight": 0.1,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.360926418413
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.8018759451847256
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.003775281408800131
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.013305385986935009
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.021601746113549494
+        }
+      ]
+    },
+    {
+      "month": "2028-01-01",
+      "h": 17,
+      "pred": 4189.77291001886,
+      "q05": 4186.98726878444,
+      "q95": 4193.571088729777,
+      "snow_weight": 0.09,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.520623868772
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.71793146417755
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.003587613780682737
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.012762286080854711
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.02060771343492739
+        }
+      ]
+    },
+    {
+      "month": "2028-02-01",
+      "h": 18,
+      "pred": 4190.078135959092,
+      "q05": 4187.077147823129,
+      "q95": 4193.737257611833,
+      "snow_weight": 0.09,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.819976754056
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.7113785262987266
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.0037981610392909823
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.012950410412202538
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.021310019292294244
+        }
+      ]
+    },
+    {
+      "month": "2028-03-01",
+      "h": 19,
+      "pred": 4190.450968627028,
+      "q05": 4187.24815156556,
+      "q95": 4194.077522257468,
+      "snow_weight": 0.09,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4191.189059779147
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.7058412694937134
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.003969551388814165
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.01333013847077827
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.022889295543775653
+        }
+      ]
+    },
+    {
+      "month": "2028-04-01",
+      "h": 20,
+      "pred": 4190.743131706173,
+      "q05": 4187.450008555187,
+      "q95": 4194.325976715282,
+      "snow_weight": 0.03,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.987465962476
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.23272003608085454
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.0013295246108718246
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.00447153116255823
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.008472213670466185
+        }
+      ]
+    },
+    {
+      "month": "2028-05-01",
+      "h": 21,
+      "pred": 4190.929261614098,
+      "q05": 4187.651328876033,
+      "q95": 4194.392273034073,
+      "snow_weight": 0.03,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4191.17315642515
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.23137208569082465
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.001348078962915637
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.0047266718618154775
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.009144132462391217
+        }
+      ]
+    },
+    {
+      "month": "2028-06-01",
+      "h": 22,
+      "pred": 4190.934846051694,
+      "q05": 4187.397682883002,
+      "q95": 4194.331142220182,
+      "snow_weight": 0.03,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4191.179206086474
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.23084574823152773
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.001446197335889096
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.00529629799957668
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.009664185884818556
+        }
+      ]
+    },
+    {
+      "month": "2028-07-01",
+      "h": 23,
+      "pred": 4190.560801418237,
+      "q05": 4186.953129691772,
+      "q95": 4194.122492085542,
+      "snow_weight": 0.03,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.805995178051
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.231353440076697
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.0014755802170202995
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.0054957441428068006
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.009820155810548707
+        }
+      ]
+    },
+    {
+      "month": "2028-08-01",
+      "h": 24,
+      "pred": 4190.000861016176,
+      "q05": 4186.298955913679,
+      "q95": 4193.531607182371,
+      "snow_weight": 0.02,
+      "contributions": [
+        {
+          "input": "reference_path",
+          "value": null,
+          "reference": null,
+          "contribution_ft": 4190.165123735345
+        },
+        {
+          "input": "avg_elevation",
+          "value": 4190.325809601814,
+          "reference": 4198.516735959688,
+          "contribution_ft": -0.15487438017230296
+        },
+        {
+          "input": "swe_eom_gsl",
+          "value": 0.0,
+          "reference": 8.361204137969574e-05,
+          "contribution_ft": 0.0009999243321706028
+        },
+        {
+          "input": "prec_wy_eom_gsl",
+          "value": 29.16545437032526,
+          "reference": 34.37898536583052,
+          "contribution_ft": -0.0037310604999616845
+        },
+        {
+          "input": "head_diff_ft",
+          "value": 0.3387411794356012,
+          "reference": 0.9232872833209591,
+          "contribution_ft": -0.006657202829946797
+        }
+      ]
+    }
+  ]
+}

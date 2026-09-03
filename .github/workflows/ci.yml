@@ -14,3 +14,11 @@ jobs:
       - run: uv run --frozen ruff check src tests
       - run: uv run --frozen ruff format --check src tests
       - run: uv run --frozen pytest -q
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: 1.7.32
+      - run: quarto render site

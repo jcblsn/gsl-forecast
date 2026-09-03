@@ -4,12 +4,8 @@ import pandas as pd
 import pytest
 from dateutil.relativedelta import relativedelta
 
-from src.forecasting.cross_validate import (
-    evaluate_at_cutoff,
-    sample_cutoffs,
-    summarize,
-    valid_cutoffs,
-)
+from src.forecasting.cross_validate import evaluate_at_cutoff, summarize
+from src.forecasting.cutoffs import sample_cutoffs, valid_cutoffs
 from src.forecasting.univariate.naive import NaiveForecaster
 
 

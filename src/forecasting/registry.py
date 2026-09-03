@@ -1,4 +1,5 @@
 from src.forecasting.base import Forecaster
+from src.forecasting.multivariate.blend import BlendForecaster
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 from src.forecasting.univariate.drift import DriftForecaster
@@ -32,6 +33,12 @@ def all_forecasters() -> list[Forecaster]:
         ),
         InflowChainForecaster(),
         InflowChainForecaster(level_term="area", name="inflow_chain_area"),
+        BlendForecaster(),
+        BlendForecaster(
+            snow_features=["swe_eom_gsl", "prec_wy_eom_gsl"],
+            snow_name="swe_regression",
+            name="blend_swe",
+        ),
     ]
 
 
@@ -44,7 +51,9 @@ PRODUCTION_MODELS = {
     "ets_damped_noseas",
     "theta",
     "swe_regression",
+    "swe_head",
     "inflow_chain",
+    "blend",
 }
 
 

@@ -14,7 +14,15 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from ..base import Forecaster
-from .regression import TARGET_COL, TIME_COL, design, require_columns, ridge_fit
+from .regression import (
+    TARGET_COL,
+    TIME_COL,
+    design,
+    fallback_reason,
+    log_fallback,
+    require_columns,
+    ridge_fit,
+)
 
 DEFAULT_FEATURES = ["swe_eom_gsl", "prec_wy_eom_gsl"]
 
@@ -24,7 +32,7 @@ class SweRegressionForecaster(Forecaster):
         self,
         features: list[str] | None = None,
         min_obs: int = 10,
-        alpha: float = 1e-3,
+        alpha: float | None = None,
         name: str = "swe_regression",
     ):
         super().__init__(name=name)
@@ -40,7 +48,8 @@ class SweRegressionForecaster(Forecaster):
         self.is_fitted = True
         return self
 
-    def _delta(self, h: int) -> float:
+    def _horizon_fit(self, h: int) -> dict[str, object]:
+        """The fit for one lead: the coefficients, the columns, and the training rows."""
         df = self._data
         n = len(df)
         last = df.iloc[-1]
@@ -54,19 +63,65 @@ class SweRegressionForecaster(Forecaster):
             ]
         )
         if len(idx) == 0:
-            return 0.0
+            return {"beta": np.array([0.0, 0.0]), "columns": [TARGET_COL], "rows": df.iloc[[-1]]}
         y = df[TARGET_COL].to_numpy()
         dy = y[idx + h] - y[idx]
         rows = df.iloc[idx]
         ok = rows[self.features].notna().all(axis=1).to_numpy()
         have_now = bool(last[self.features].notna().all())
-        if ok.sum() >= self.min_obs and have_now:
+        reason = fallback_reason(int(ok.sum()), self.min_obs, have_now)
+        if reason is None:
             cols = [TARGET_COL, *self.features]
             beta = ridge_fit(design(rows[ok], cols), dy[ok], self.alpha)
-            x = np.concatenate([[1.0], last[cols].to_numpy(dtype=float)])
-            return float(x @ beta)
+            return {"beta": beta, "columns": cols, "rows": rows[ok]}
+        log_fallback(self.name, h, reason)
         beta = ridge_fit(design(rows, [TARGET_COL]), dy, self.alpha)
-        return float(np.array([1.0, last[TARGET_COL]]) @ beta)
+        return {"beta": beta, "columns": [TARGET_COL], "rows": rows}
+
+    def _delta(self, h: int) -> float:
+        fitted = self._horizon_fit(h)
+        columns = fitted["columns"]
+        x = np.concatenate([[1.0], self._data.iloc[-1][columns].to_numpy(dtype=float)])
+        return float(x @ fitted["beta"])
+
+    def contributions(self, h: int) -> pd.DataFrame:
+        """The terms that add to the point forecast, with the training means as the origin.
+
+        The reference path is the result of the fit for a cutoff with average inputs. Each
+        other term is the coefficient multiplied by the distance of that input from its
+        training mean. These terms are parts of the fitted model. They are not causal
+        effects.
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Model must be fitted before explanation")
+        last = self._data.iloc[-1]
+        output = []
+        for lead in range(1, h + 1):
+            fitted = self._horizon_fit(lead)
+            beta, columns, rows = fitted["beta"], fitted["columns"], fitted["rows"]
+            means = rows[columns].mean()
+            reference = float(means[TARGET_COL] + beta[0] + means.to_numpy() @ beta[1:])
+            terms = [
+                {
+                    "input": "reference_path",
+                    "value": None,
+                    "reference": None,
+                    "contribution_ft": reference,
+                }
+            ]
+            for i, column in enumerate(columns, start=1):
+                coefficient = float(beta[i]) + (1.0 if column == TARGET_COL else 0.0)
+                terms.append(
+                    {
+                        "input": column,
+                        "value": float(last[column]),
+                        "reference": float(means[column]),
+                        "contribution_ft": coefficient * float(last[column] - means[column]),
+                    }
+                )
+            month = self.last_date + relativedelta(months=lead)
+            output.extend({"month": month, "h": lead, **term} for term in terms)
+        return pd.DataFrame(output)
 
     def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:
         if not self.is_fitted:
@@ -83,4 +138,8 @@ class SweRegressionForecaster(Forecaster):
         )
 
     def get_metrics(self) -> dict[str, object]:
-        return {"features": ",".join(self.features), "min_obs": self.min_obs, "alpha": self.alpha}
+        return {
+            "features": ",".join(self.features),
+            "min_obs": self.min_obs,
+            "alpha": self.alpha if self.alpha is not None else "gcv",
+        }

@@ -284,7 +284,9 @@ def transform_covariates(
     over the reporting stations per basin (the roster grows with dam construction, so early
     sums are smaller for a physical reason). Inflow and breach flow in kaf, north-arm mean
     elevation, the south-minus-north head, and climate-division mean temperature and
-    precipitation (one month behind at issue time)."""
+    precipitation. NOAA releases a climate month around the 8th of the next month, so the
+    cutoff month has no climate value at issue time. A model must read the `_lag1` copies,
+    never the unlagged columns."""
     inflow = discharge["inflow"]
     exchange = discharge.get("exchange", {})
     flow_cols = ",\n".join(
@@ -369,17 +371,23 @@ def transform_covariates(
         climate AS (
             SELECT month, AVG(tavg_f) AS tavg_f_gsl, AVG(prcp_in) AS prcp_in_gsl
             FROM climdiv_monthly GROUP BY month
+        ),
+        climate_lag AS (
+            SELECT month + INTERVAL 1 MONTH AS month,
+                   tavg_f_gsl AS tavg_f_gsl_lag1, prcp_in_gsl AS prcp_in_gsl_lag1
+            FROM climate
         )
         SELECT month, s.* EXCLUDE (month), f.* EXCLUDE (month),
                {total} AS inflow_kaf_total,
                r.* EXCLUDE (month),
                n.north_arm_ft, e.avg_elevation - n.north_arm_ft AS head_diff_ft,
-               c.* EXCLUDE (month)
+               c.* EXCLUDE (month), cl.* EXCLUDE (month)
         FROM snow_wide s
         FULL OUTER JOIN flow_wide f USING (month)
         FULL OUTER JOIN res_wide r USING (month)
         FULL OUTER JOIN north n USING (month)
         FULL OUTER JOIN climate c USING (month)
+        LEFT JOIN climate_lag cl USING (month)
         LEFT JOIN monthly_elevation e USING (month)
         WHERE month < DATE_TRUNC('month', CURRENT_DATE)
         ORDER BY month

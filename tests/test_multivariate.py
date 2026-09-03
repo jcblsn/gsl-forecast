@@ -5,7 +5,17 @@ import pandas as pd
 import pytest
 from dateutil.relativedelta import relativedelta
 
+from src.forecasting.multivariate.blend import _CACHE as blend_cache
+from src.forecasting.multivariate.blend import (
+    SEASON_MONTHS,
+    WEIGHT_GRID,
+    BlendForecaster,
+    default_weights,
+    issue_season,
+    monotone_weight_path,
+)
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
+from src.forecasting.multivariate.regression import fallback_reason, gcv_alpha, ridge_fit
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 
 
@@ -30,6 +40,7 @@ def synthetic():
                 "avg_elevation": level,
                 "swe_eom_gsl": swe,
                 "prec_wy_eom_gsl": swe * 1.5,
+                "head_diff_ft": 0.5 + 0.02 * (level - 4195.0),
                 "inflow_kaf_total": inflow,
             }
         )
@@ -69,3 +80,130 @@ def test_falls_back_when_covariates_missing_at_cutoff(synthetic):
     train.loc[train.index[-1], ["swe_eom_gsl", "prec_wy_eom_gsl"]] = np.nan
     preds = SweRegressionForecaster().fit(train).predict(3)
     assert preds["pred"].notna().all()
+
+
+def test_ridge_matches_least_squares_with_a_tiny_penalty():
+    rng = np.random.default_rng(1)
+    X = np.column_stack([np.ones(60), rng.normal(size=(60, 2))])
+    y = 3.0 + 2.0 * X[:, 1] - 1.5 * X[:, 2] + rng.normal(scale=0.1, size=60)
+    beta = ridge_fit(X, y, alpha=1e-10)
+    expected = np.linalg.lstsq(X, y, rcond=None)[0]
+    assert np.allclose(beta, expected, atol=1e-6)
+
+
+def test_ridge_predictions_are_invariant_to_feature_scale():
+    rng = np.random.default_rng(2)
+    X = np.column_stack([np.ones(60), rng.normal(size=(60, 2))])
+    y = 4192.0 + 0.5 * X[:, 1] + rng.normal(scale=0.1, size=60)
+    scaled = X.copy()
+    scaled[:, 1] *= 1000.0
+    plain = X @ ridge_fit(X, y, alpha=1.0)
+    rescaled = scaled @ ridge_fit(scaled, y, alpha=1.0)
+    assert np.allclose(plain, rescaled, atol=1e-8)
+
+
+def _centered(X, y):
+    features = X[:, 1:]
+    z = (features - features.mean(axis=0)) / features.std(axis=0)
+    return z, y - y.mean()
+
+
+def test_gcv_picks_a_larger_penalty_for_pure_noise():
+    rng = np.random.default_rng(3)
+    X = np.column_stack([np.ones(40), rng.normal(size=(40, 3))])
+    signal = 4192.0 + 5.0 * X[:, 1]
+    noise = 4192.0 + rng.normal(scale=1.0, size=40)
+    assert gcv_alpha(*_centered(X, noise)) > gcv_alpha(*_centered(X, signal))
+
+
+def test_fallback_reason_states_the_rule():
+    assert fallback_reason(20, 10, True) is None
+    assert "NULL at the cutoff" in fallback_reason(20, 10, False)
+    assert "min_obs=10" in fallback_reason(4, 10, True)
+
+
+def _blend(**kw):
+    return BlendForecaster(horizon=12, history_years=10, max_cutoffs=60, min_rows=4, **kw)
+
+
+def test_issue_seasons_cover_every_month():
+    assert set().union(*SEASON_MONTHS.values()) == set(range(1, 13))
+    assert issue_season(pd.Timestamp("2025-12-01")) == "accumulation"
+    assert issue_season(pd.Timestamp("2025-03-01")) == "melt"
+    assert issue_season(pd.Timestamp("2025-08-01")) == "recession"
+
+
+def test_blend_weights_fall_with_the_lead_in_every_fitted_season(synthetic):
+    model = _blend().fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
+    assert model.fitted_seasons
+    for season in model.fitted_seasons:
+        w = model.weights[season]
+        assert len(w) == 12
+        assert ((w >= 0) & (w <= 1)).all()
+        assert (np.diff(w) <= 1e-9).all()
+
+
+def test_blend_lies_between_its_components(synthetic):
+    train = synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")]
+    model = _blend().fit(train)
+    snow, univariate = (f.predict(12)["pred"].to_numpy() for f in model._fitted)
+    blended = model.predict(12)["pred"].to_numpy()
+    assert (blended >= np.minimum(snow, univariate) - 1e-9).all()
+    assert (blended <= np.maximum(snow, univariate) + 1e-9).all()
+
+
+def test_blend_selects_the_curve_for_the_issue_season(synthetic):
+    model = _blend().fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
+    model.weights["accumulation"] = np.zeros(12)
+    model.weights["melt"] = np.ones(12)
+    snow, univariate = (f.predict(12)["pred"].to_numpy() for f in model._fitted)
+    assert issue_season(pd.Timestamp("2015-03-01")) == "melt"
+    assert np.allclose(model.predict(12)["pred"], snow)
+    december = model.predict(12, start_date=pd.Timestamp("2015-12-01"))
+    assert issue_season(pd.Timestamp("2015-12-01")) == "accumulation"
+    assert np.allclose(december["pred"], univariate)
+
+
+def test_monotone_path_beats_a_per_lead_fit_on_the_stated_objective():
+    """The constrained search must minimise the loss it claims, not project a free fit."""
+    rng = np.random.default_rng(7)
+    loss = rng.random((6, len(WEIGHT_GRID)))
+    path = monotone_weight_path(loss)
+    assert (np.diff(path) <= 1e-9).all()
+    index = {round(float(w), 2): i for i, w in enumerate(WEIGHT_GRID)}
+    chosen = sum(loss[lead, index[round(float(w), 2)]] for lead, w in enumerate(path))
+    free = np.sort(WEIGHT_GRID[loss.argmin(axis=1)])[::-1]
+    projected = sum(loss[lead, index[round(float(w), 2)]] for lead, w in enumerate(free))
+    assert chosen <= projected + 1e-9
+
+
+def test_default_weights_ramp_from_one_to_zero():
+    w = default_weights(24)
+    assert w[0] == 1.0 and w[5] == 1.0
+    assert w[-1] == 0.0
+    assert (np.diff(w) <= 1e-9).all()
+
+
+def test_snowpack_contributions_sum_to_the_prediction(synthetic):
+    cutoff = pd.Timestamp("2015-03-01")
+    model = SweRegressionForecaster().fit(synthetic[synthetic["month"] <= cutoff])
+    predictions = model.predict(6).set_index("month")["pred"]
+    explained = model.contributions(6).groupby("month")["contribution_ft"].sum()
+    assert np.allclose(predictions, explained)
+
+
+def test_blend_contributions_sum_to_the_blended_prediction(synthetic):
+    model = _blend().fit(synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")])
+    predictions = model.predict(12).set_index("month")["pred"]
+    explained = model.contributions(12).groupby("month")["contribution_ft"].sum()
+    assert np.allclose(predictions, explained)
+
+
+def test_blends_with_different_components_do_not_share_the_cache(synthetic):
+    """The memo is keyed on the component name, so `blend` and `blend_swe` stay separate."""
+    train = synthetic[synthetic["month"] <= pd.Timestamp("2015-03-01")]
+    blend_cache.clear()
+    _blend().fit(train)
+    _blend(snow_features=["swe_eom_gsl", "prec_wy_eom_gsl"], snow_name="swe_regression").fit(train)
+    labels = {key[0] for key in blend_cache}
+    assert labels == {"swe_head", "swe_regression", "ets_damped_s12"}
