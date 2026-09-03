@@ -4,6 +4,7 @@ from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
 from src.forecasting.multivariate.state_space import StateSpaceForecaster
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 from src.forecasting.univariate.drift import DriftForecaster
+from src.forecasting.univariate.endpoint_seasonal import EndpointSeasonalForecaster
 from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
 from src.forecasting.univariate.moving_average import MovingAverageForecaster
 from src.forecasting.univariate.naive import NaiveForecaster
@@ -56,6 +57,7 @@ def all_forecasters() -> list[Forecaster]:
     return [
         NaiveForecaster(method="last"),
         NaiveForecaster(method="seasonal", seasonal_period=12),
+        EndpointSeasonalForecaster(),
         MovingAverageForecaster(window=3),
         MovingAverageForecaster(window=6),
         MovingAverageForecaster(window=12),
@@ -87,6 +89,7 @@ def all_forecasters() -> list[Forecaster]:
 PRODUCTION_MODELS = {
     "naive_last",
     "naive_seasonal",
+    "endpoint_seasonal",
     "drift_24m",
     "ets_damped_s12",
     "ets_add_s12",

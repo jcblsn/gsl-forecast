@@ -70,6 +70,16 @@ Two roster effects change the meaning of a raw mean over time. The SNOTEL roster
 18 sites in 1979 to 55 sites in 2026, so a raw basin mean drifts. The reservoir roster grows
 as dams are built, so early storage sums are smaller for a physical reason.
 
+## 2.1 The endpoint seasonal baseline
+
+`endpoint_seasonal` is the strong state-only baseline. Within each fit it compares the last
+daily elevation, the median of the final 3 calendar days, and the median of the final 7 calendar
+days. Candidate comparison uses expanding one-step errors from targets already observed inside
+that fit. For each lead, the forecast is the selected current endpoint plus the historical
+median endpoint-to-target change among origins in the same calendar month. The monthly mean
+remains the target; the endpoint is only the initial state. If endpoint fields are unavailable,
+the latest monthly mean provides an explicit compatibility fallback.
+
 ## 3 The swe_regression model
 
 This model generalises the NRCS outlook to every calendar month and every lead.
