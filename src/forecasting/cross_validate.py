@@ -23,6 +23,7 @@ from src.forecasting.headline import (
 )
 from src.forecasting.quantiles import leave_one_year_out_scores, season_scores
 from src.forecasting.registry import BASELINE, all_forecasters
+from src.forecasting.results import write_manifest
 
 
 def resolve_evaluation_split(
@@ -353,7 +354,13 @@ def run_cross_validation(
 
     if results_dir:
         tracker.snapshot(exp_id, results_dir)
-        logging.info(f"Wrote the committed results snapshot to {results_dir}")
+        # The tracker writes the files. It cannot know the evaluation policy the run
+        # followed, and it does not hash what it wrote, so the manifest completes the record.
+        manifest = write_manifest(results_dir, config["evaluation_policy"]["version"], split_name)
+        logging.info(
+            f"Wrote the committed results snapshot to {results_dir} "
+            f"({manifest['numeric_value_count']} metric values hashed)"
+        )
 
     if make_plots:
         from src.forecasting.plots import plot_cv_mae, plot_cv_ratio

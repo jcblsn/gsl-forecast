@@ -165,3 +165,26 @@ def test_frozen_development_snapshot_matches_its_manifest():
         "apr_jun_monthly_mean_max",
         "september_monthly_mean",
     }
+
+
+def test_a_fresh_snapshot_verifies_against_the_manifest_it_writes(tmp_path):
+    """gsl-cv --results-dir wrote no manifest, so CI could not verify what it produced."""
+    from src.forecasting.results import verify_manifest, write_manifest
+
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "experiment.json").write_text(
+        json.dumps({"name": "GSL_CV_TEST", "git_commit": "abc123"}) + "\n"
+    )
+    (results / "metrics.csv").write_text("run_id,run_name,metric,dims,value\n1,m,mae,h=1,0.5\n")
+    (results / "runs.csv").write_text("run_id,name\n1,m\n")
+
+    manifest = write_manifest(str(results), "gsl-evaluation-v1", "development")
+    assert manifest["source_run"] == "GSL_CV_TEST"
+    assert manifest["numeric_value_count"] == 1
+    assert set(manifest["files"]) == {"experiment.json", "metrics.csv", "runs.csv"}
+    assert verify_manifest(str(results)) == manifest
+
+    (results / "metrics.csv").write_text("run_id,run_name,metric,dims,value\n1,m,mae,h=1,0.9\n")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        verify_manifest(str(results))

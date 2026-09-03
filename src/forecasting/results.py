@@ -61,6 +61,55 @@ def _numeric_values_sha256(path: str) -> tuple[int, str]:
     return len(values), hashlib.sha256(payload).hexdigest()
 
 
+SNAPSHOT_FILES = (EXPERIMENT, METRICS, RUNS)
+DEFAULT_LIMITATIONS = (
+    "This repeatedly used development cohort is unsuitable as untouched test evidence.",
+    "The snapshot does not contain row-level predictions, so its summary metrics cannot be "
+    "recomputed from this directory.",
+    "Historical cross-validation uses revised data rather than issue-vintage inputs.",
+)
+
+
+def write_manifest(
+    results_dir: str,
+    evaluation_policy_version: str,
+    evaluation_split: str,
+    limitations: tuple[str, ...] = DEFAULT_LIMITATIONS,
+    note: str | None = None,
+) -> dict:
+    """Hash a snapshot so a published number cannot drift away from the run behind it.
+
+    The tracker writes the snapshot files. It cannot know the evaluation policy the run
+    followed, and it does not hash what it wrote, so this function completes the record.
+    `gsl-results --verify-manifest` reads it back, and continuous integration runs that.
+    """
+    with open(os.path.join(results_dir, EXPERIMENT)) as stream:
+        experiment = json.load(stream)
+    count, digest = _numeric_values_sha256(os.path.join(results_dir, METRICS))
+    manifest = {
+        "schema_version": 1,
+        "snapshot_status": "frozen_development_only",
+        "evaluation_policy_version": evaluation_policy_version,
+        "evaluation_split": evaluation_split,
+        "source_run": experiment.get("name"),
+        "source_commit": experiment.get("git_commit"),
+        "limitations": list(limitations),
+        "numeric_value_count": count,
+        "numeric_values_sha256": digest,
+        "files": {
+            name: {"sha256": _sha256(os.path.join(results_dir, name))}
+            for name in SNAPSHOT_FILES
+            if os.path.exists(os.path.join(results_dir, name))
+        },
+    }
+    if note:
+        manifest["source_note"] = note
+    with open(os.path.join(results_dir, MANIFEST), "w") as stream:
+        json.dump(manifest, stream, indent=2)
+        stream.write("\n")
+    return manifest
+
+
 def verify_manifest(results_dir: str = RESULTS_DIR) -> dict:
     """Verify the immutable development snapshot against its checked-in manifest."""
     path = os.path.join(results_dir, MANIFEST)
