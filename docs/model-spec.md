@@ -411,11 +411,40 @@ cutoff, then predicts 24 months. It records the policy version and exact bounds 
 MAE and RMSE per model and lead, MAE relative to `naive_last`, mean pinball loss, nominal
 90% coverage, and the 2 headline scalars by issue month.
 
-Two caveats apply to every number this harness produces.
+### 8.1 How precise these numbers are
 
-1. The harness reads today's data. USGS revises provisional elevation and discharge, and the
-   SNOTEL roster grew. A forecast issued in 2013 did not have these values. The live record
-   in `forecasts/` is the only vintage-correct score.
+The 157 cutoffs overlap heavily. A 24-month forecast from one cutoff shares 23 of its target
+months with the next cutoff, so the cohort holds about 13 hydrologic years and not 157
+independent cases. A 3-decimal rank table therefore overstates what the record settles.
+
+`src/forecasting/bootstrap.py` resamples the cutoff sequence with a circular moving block of
+24 months, which is the horizon and therefore the span over which 2 cutoffs can share a
+target month. `gsl-cv` prints the MAE of the headline model with a 95% interval, and its
+paired improvement over `naive_last` on the same resampled cutoffs. It writes both to
+`outputs/mae_intervals_<stamp>.parquet` and `outputs/improvements_<stamp>.parquet`.
+
+For the frozen development run the `blend` MAE intervals are:
+
+| Lead | MAE | 95% interval | Improvement over `naive_last` |
+|---:|---:|---|---|
+| 1 | 0.126 | 0.099-0.153 | +0.210 [+0.174, +0.247] |
+| 3 | 0.319 | 0.250-0.399 | +0.580 [+0.484, +0.674] |
+| 6 | 0.521 | 0.368-0.724 | +0.809 [+0.680, +0.951] |
+| 12 | 1.069 | 0.722-1.498 | +0.216 [-0.056, +0.475] |
+| 18 | 1.615 | 1.093-2.168 | +0.296 [-0.075, +0.631] |
+| 24 | 1.999 | 1.368-2.617 | -0.205 [-0.667, +0.280] |
+
+The improvement is clear through lead 6 and includes 0 at leads 12, 18 and 24. A difference
+of a few hundredths of a foot between 2 models is not evidence of a better model.
+
+These are descriptive sensitivity estimates. They are not formal sampling intervals under a
+fully specified data-generating process, and they do not prove stationarity.
+
+### 8.2 Caveats on every number
+
+1. The harness reads today's data. USGS revises provisional elevation and discharge. A
+   forecast issued in 2013 did not have these values. The live record in `forecasts/` is the
+   only vintage-correct score.
 2. Overlapping target months make long-lead interval scores slightly optimistic. See section
    7.
 

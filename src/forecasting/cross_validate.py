@@ -8,6 +8,11 @@ from experiment_tracker import ExperimentTracker
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
+from src.forecasting.bootstrap import (
+    format_improvements,
+    mae_intervals,
+    paired_improvements,
+)
 from src.forecasting.cutoffs import policy_cutoffs
 from src.forecasting.data import load_monthly_data
 from src.forecasting.headline import (
@@ -187,6 +192,28 @@ def log_to_tracker(
                     run.log_metrics(values, dims=dims)
 
 
+def print_precision(precision: pd.DataFrame, improvements: pd.DataFrame, model: str) -> None:
+    """The headline model's MAE and its gain over the baseline, each with an interval.
+
+    The cutoffs overlap, so a 3-decimal rank table overstates what the record settles. An
+    improvement whose interval contains 0 is not evidence of an improvement.
+    """
+    rows = precision[precision["model"] == model]
+    if rows.empty:
+        return
+    print(
+        f"\n24-month circular block bootstrap for {model} ({int(rows['n_cutoffs'].iloc[0])} "
+        "overlapping cutoffs, 95% intervals):"
+    )
+    for _, row in rows.iterrows():
+        print(f"  h={int(row['h']):2d} MAE {row['mae']:.3f} [{row['lo']:.3f}, {row['hi']:.3f}]")
+    gains = improvements[improvements["model"] == model]
+    if gains.empty:
+        return
+    print(f"\nPaired improvement over {gains['baseline'].iloc[0]}, same resampled cutoffs:")
+    print(format_improvements(gains))
+
+
 def print_season_coverage(by_season: pd.DataFrame, model: str, leads=(1, 3, 6, 12, 24)) -> None:
     """Coverage and band width per issue season, for one model.
 
@@ -277,6 +304,9 @@ def run_cross_validation(
     prob = leave_one_year_out_scores(cv_df)
     summary = summary.merge(prob, on=["model", "h"], how="left")
     by_season = season_scores(cv_df)
+    report_leads = [h for h in (1, 3, 6, 12, 18, 24) if h <= horizon]
+    precision = mae_intervals(cv_df, leads=report_leads)
+    improvements = paired_improvements(cv_df, BASELINE, leads=report_leads)
 
     stamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
     cutoff_desc = split_name if n_cutoffs is None else f"{n_cutoffs} sampled from {split_name}"
@@ -312,6 +342,8 @@ def run_cross_validation(
     cv_df.to_parquet(per_cutoff_path, index=False)
     headline.to_parquet(os.path.join(output_dir, f"headline_{stamp}.parquet"), index=False)
     by_season.to_parquet(os.path.join(output_dir, f"season_coverage_{stamp}.parquet"), index=False)
+    precision.to_parquet(os.path.join(output_dir, f"mae_intervals_{stamp}.parquet"), index=False)
+    improvements.to_parquet(os.path.join(output_dir, f"improvements_{stamp}.parquet"), index=False)
     # The run records where the parquet went, so asking the tracker replaces passing a path
     # between commands in a text file. The path and not the bytes: the predictions table
     # already holds the same rows, keyed by cutoff and lead.
@@ -331,6 +363,7 @@ def run_cross_validation(
         logging.info(f"Saved CV plots to {output_dir}")
 
     print_summary(summary, horizon)
+    print_precision(precision, improvements, fc.get("headline_model") or BASELINE)
     print_season_coverage(by_season, fc.get("headline_model") or BASELINE)
     print_headline(headline_summary)
     return summary
