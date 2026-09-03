@@ -278,6 +278,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     forecasters = None
+    results_dir = args.results_dir or None
+    if args.models and results_dir:
+        # A run over a subset is an experiment, not the published set, so it must not
+        # replace the committed record of the full run.
+        logging.info("--models given, so this run does not write the results artifact")
+        results_dir = None
     if args.models:
         wanted = set(args.models.split(","))
         forecasters = [f for f in all_forecasters() if f.name in wanted]
@@ -297,7 +303,7 @@ def main() -> None:
         output_dir=args.output_dir,
         forecasters=forecasters,
         make_plots=not args.no_plots,
-        results_dir=args.results_dir or None,
+        results_dir=results_dir,
         path_out=args.path_out,
     )
 

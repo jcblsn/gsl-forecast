@@ -110,6 +110,38 @@ No formal skill statistics are published. Three seasons of verification is too f
 
 Takeaway: given observed inflow and precipitation, the level is essentially deterministic. All forecast uncertainty lives in the inflow forecast.
 
+## 4.1 Bayesian and state-space water balance
+
+This branch was absent from the survey until 2026-09-03. It is the methodological gap
+between section 3, which is regression on the lake record, and section 4, which is a
+deterministic mass balance with no account of measurement error.
+
+- Smith and Gronewold (2018), Advances in Water Resources, arXiv:1710.10161: the Large Lake
+  Statistical Water Balance Model (L2SWBM), a Bayesian water balance for Lakes Superior and
+  Michigan-Huron. It reconciles inflow, over-lake precipitation, evaporation and level, and
+  it states the bias and the uncertainty of each measurement instead of treating an input as
+  exact. The authors compare 26 model forms and choose on both closure and run time. This is
+  the closest published precedent for a probabilistic water balance of a large lake.
+- NOAA GLERL (2018), summary report on the same model, gives the operational form.
+- Durbin and Koopman, "Time Series Analysis by State Space Methods": the standard reference
+  for the filter and the smoother. `statsmodels` implements both, and this project already
+  depends on `statsmodels` for the exponential smoothing models.
+- Slater and Villarini, and the wider data-assimilation literature on snow (for example the
+  ensemble Kalman filter and particle filter comparison of Slater and Clark, 2006, for snow
+  water equivalent): a filter is the standard way to carry a snow or storage state forward
+  under uncertainty.
+- Quaedvlieg (2021), J. Business and Economic Statistics, doi:10.1080/07350015.2019.1620074:
+  tests that compare 2 forecasters over a complete path of horizons instead of 1 horizon at
+  a time. The relevant reported pattern is that an iterated state-space method trails a
+  direct method at short leads and improves with the horizon.
+
+Takeaway, and the reason it matters here: the models in this repository are all direct. Each
+lead has its own fit, so nothing links the 24 months of a path, and the interval comes from
+past errors rather than from the model. `state_space` (section 4.1 of `docs/model-spec.md`)
+is the first iterated model here, and it does show the reported shape: worse than
+`inflow_chain` to lead 8, better from lead 12 to lead 24, with the lowest CRPS at lead 12 of
+any model. It does not yet beat `blend`.
+
 ## 5. Area and volume
 
 - No paper forecasts surface area or volume as a primary target beyond deriving them from level via hypsometry. Radwin and Bowen (2024) provide Landsat/Sentinel water area 1984-2023 (error under 1 percent deep water, about 4 percent in shallow bays); Root (2023) provides the USGS elevation-area-volume tables. Our level forecasts convert to area and volume through those tables.
@@ -139,7 +171,7 @@ The README "Current results" section holds the one maintained set of numbers: wa
 1. Priority predictor: SNOTEL SWE and accumulated precipitation for GSL-contributing sites, aggregated to a basin index (NRCS AWDB API; the NRCS GSL page lists the site set). This is what resolves the December-February cutoff problem documented in the README.
 2. Second: tributary streamflow (USGS 10126000 Bear near Corinne, 10141000 Weber near Plain City, 10171000 Jordan at 1700 S) as lagged regressors, and the CBRFC ESP or NRCS seasonal volume forecasts as forward-looking regressors available at issue time.
 3. Third, for horizons beyond 12 months: NINO4 SST and Pacific QDO index (Kaplan or ERSST via NOAA PSL), Utah Climate Division precipitation, and the DeRose 2014 tree-ring dGSL reconstruction. Expect small gains; the literature shows about 1 ft over 8 years.
-4. Structure: a water-balance skeleton (level change = f(inflow, precipitation, evaporation) through hypsometry) with statistically forecast inflow will likely beat a free-form regression, because the process models show level is deterministic given inflow. Evaporation can be approximated by a seasonal climatology at first (Strike Team average 2.7 Maf/yr).
+4. Structure: a water-balance skeleton (level change = f(inflow, precipitation, evaporation) through hypsometry) with statistically forecast inflow will likely beat a free-form regression, because the process models show level is deterministic given inflow. Evaporation can be approximated by a seasonal climatology at first (Strike Team average 2.7 Maf/yr). Implemented twice: `inflow_chain` as a deterministic recursion and `state_space` as a filter (section 4.1 above). Neither beats the direct regression at short leads, which is where the peak is decided.
 5. Evaluation: keep the walk-forward harness, but add a spring-peak metric (June level from Dec-Mar cutoffs) so results are comparable to NRCS, and report errors with and without 2022-2023.
 6. Caution from Zhu et al. (2022) and our own naive_last results: for slowly varying lakes persistence is a strong baseline at short horizons; any multivariate model must be scored against naive_last at every horizon, as the harness already does.
 
@@ -148,6 +180,8 @@ The README "Current results" section holds the one maintained set of numbers: wa
 - Lall, Moon, Kwon, Bosworth (2006), WRR: locally weighted polynomial regression for short-term GSL forecasts; probably the cleanest sub-annual metrics. Cited but not returned.
 - Moon, Lall, Kwon (2007) full text for the SOI/PNA/CNP gain magnitude.
 - Gillies et al. (2015) full text for the ARX specification and lag orders.
+- Smith and Gronewold (2018) full text for the L2SWBM priors and the sampler, before any
+  Bayesian phase of `state_space`.
 - NRCS WSOR PDFs (Jan-May 2024-2026) for the exact GSL inflow regression sites; curl to nrcs.usda.gov is blocked from this sandbox.
 
 ## 11. Where this project can add value

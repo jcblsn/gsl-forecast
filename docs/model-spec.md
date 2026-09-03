@@ -143,6 +143,49 @@ This design has 2 known weaknesses.
 - The recursion accumulates error. The `c_m` term damps the path, but a stage-1 error at
   lead 3 still moves every later month.
 
+## 4.1 The state_space model
+
+This model restates section 4 as a linear Gaussian state-space model. The level is a latent
+state and the gauge is an observation of it:
+
+```
+level:       m_t = phi * m_(t-1) + a_(month) + b * Q_t + w_t
+observation: y_t = m_t + v_t
+```
+
+`Q_t` is the tributary inflow in kaf for month t, and it comes from stage 1 of section 4
+without a change. `a_month` absorbs the mean net evaporation and diversion for that calendar
+month. `phi` damps the level and takes the place of the `c_m` term. `w_t` is the process
+error and `v_t` is the measurement error. A Kalman filter gives the likelihood, and maximum
+likelihood gives the 16 parameters.
+
+The form differs from section 4 in 3 ways.
+
+1. The 24-month path is 1 recursion, and its variance grows at each step. So the path is
+   smooth and the interval widens with the lead, without a rule for either. Open question 1
+   asks for this.
+2. Inflow enters the state equation, not a regression on an observed value that a prediction
+   later replaces. Open question 2 names that substitution as a source of bias.
+3. One coefficient `b` covers every calendar month. A volume of water raises the lake by the
+   same amount in March and in August; what changes with the month is the evaporation, which
+   `a_month` holds. Section 4 fits a separate response for each calendar month.
+
+The inflow column enters in units of its own standard deviation. In kaf its coefficient is
+near 0.001 while a monthly term is near 0.1, and the optimizer fails a line search on that
+spread.
+
+Result, from the run in `docs/autoresearch.log` dated 2026-09-03: the model is worse than
+`blend` at every lead, and worse than `inflow_chain` to lead 8. From lead 12 it is better
+than `inflow_chain` (1.23 ft against 1.32 ft), and it stays better to lead 24 (2.14 ft
+against 2.32 ft). It has the lowest CRPS at lead 12 of any model in the run, 0.318 ft. It
+gives the best water-year end of any model from a February, March or April issue, and a poor
+one from July and August.
+
+That pattern is the one the literature reports for an iterated model against a direct one:
+weaker at short leads, stronger as the lead grows. It is the first model here with that
+shape. The registry holds it, and `PRODUCTION_MODELS` does not, because it has no
+`contributions` method for the public page.
+
 ## 5 The blend
 
 No model is the best model at each lead. Therefore the official model mixes 2 of them:
@@ -297,12 +340,15 @@ In short:
 
 ## 10 Open questions
 
-1. The forecast path is 24 independent fits. No rule makes the path smooth, and no rule
-   makes the intervals wider at longer leads. A condition on the complete path can help at
-   long leads.
+1. The forecast path is 24 independent fits, except in `state_space`. No rule makes the
+   path smooth, and no rule makes the intervals wider at longer leads. Section 4.1 gives one
+   answer, and it is better than `inflow_chain` past lead 12 but worse than `blend`
+   everywhere.
 2. Stage 2 of `inflow_chain` fits on the observed inflow and runs on the predicted inflow.
    A correction for errors in the variables, or one joint fit, can remove the bias in
-   section 4.
+   section 4. Section 4.1 removes the substitution, and it does improve the long leads.
+   A sampler with a shared prior over the monthly terms is the next form, and the criterion
+   in `docs/autoresearch.log` holds it back until a Gaussian fit earns it.
 3. Reservoir storage lowers accuracy as a plain extra regressor. Storage moves with the lake
    level and with the same trend, so it adds a collinear column and no new information. A
    measure of the deficit below capacity can separate the 2 signals.

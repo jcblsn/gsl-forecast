@@ -321,6 +321,7 @@ The table gives the name of each model in the code. The first 9 use the lake rec
 | `inflow_chain` | Snowpack predicts each future month's tributary inflow; a fitted monthly bucket step (change as a function of that month's inflow and the starting level) rolls the elevation forward |
 | `swe_head` | `swe_regression` plus the south-minus-north head difference; the best spring-peak model from January and February issues in CV, worse beyond lead 15 |
 | `inflow_chain_area` | The same with lake area from the USGS hypsometry in place of the level, so the evaporation term scales with area |
+| `state_space` | The same water balance as a state-space model: the level is a latent state, a Kalman filter gives the likelihood, and the 24-month path is 1 recursion. Better than `inflow_chain` past lead 12, worse to lead 8 |
 | `blend` | The official model: `w` on `swe_head` and `1 - w` on `ets_damped_s12`, with `w` fitted for each lead and each issue season, and forced to fall with the lead |
 | `blend_swe` | The same with `swe_regression` as the snowpack component |
 

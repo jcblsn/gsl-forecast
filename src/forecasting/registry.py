@@ -1,6 +1,7 @@
 from src.forecasting.base import Forecaster
 from src.forecasting.multivariate.blend import BlendForecaster
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
+from src.forecasting.multivariate.state_space import StateSpaceForecaster
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
 from src.forecasting.univariate.drift import DriftForecaster
 from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
@@ -33,6 +34,7 @@ def all_forecasters() -> list[Forecaster]:
         ),
         InflowChainForecaster(),
         InflowChainForecaster(level_term="area", name="inflow_chain_area"),
+        StateSpaceForecaster(),
         BlendForecaster(),
         BlendForecaster(
             snow_features=["swe_eom_gsl", "prec_wy_eom_gsl"],
