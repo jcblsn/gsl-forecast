@@ -16,8 +16,13 @@ TIME_COL = "month"
 TARGET_COL = "avg_elevation"
 ALPHA_GRID = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 3.0, 10.0, 30.0, 100.0)
 # One fit reads the rows of a single calendar month, so the record supplies about 1 row per
-# year. 4 or 5 parameters need more than the 10 rows this bar used to ask for.
-MIN_OBS = 20
+# year. 10 rows against 4 or 5 parameters is thin, and the review calls the bar too
+# permissive. Raising it was measured and reverted: the bar never binds on an outer fit
+# (swe_head scores identically at 10, 15 and 20), and where it does bind, on the early inner
+# cutoffs of the blend's weight pass, it degrades the weights instead of protecting a fit.
+# The blend's lead-6 MAE rises from 0.578 to 0.595 to 0.626 ft at 10, 15 and 20. The real
+# repair is a pooled model across issue months and leads, not a higher bar on 288 fits.
+MIN_OBS = 10
 
 
 def _standardize(X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

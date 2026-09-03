@@ -165,7 +165,7 @@ fragmented; a pooled model across issue months and leads is future work.
 The model drops 1 feature at a time under a declared rule. It drops a feature when:
 
 - The feature is NULL at the cutoff.
-- Fewer than `min_obs` rows (default 20) carry the feature.
+- Fewer than `min_obs` rows (default 10) carry the feature.
 - The standard deviation of the feature among those rows is 1% or less of its standard
   deviation over the whole training frame.
 
@@ -177,6 +177,14 @@ stays small because the input is near 0, but the coefficient is a diagnostic fai
 The model then fits on the rows that carry every feature it kept. If fewer than `min_obs`
 rows do, it drops every feature and fits `y_(i+h) - y_i = b0 + b1 * y_i`. Before this rule a
 single missing feature dropped all of them.
+
+10 rows against 4 or 5 parameters is thin, and the review calls the bar too permissive.
+Raising it was measured and reverted. The bar never binds on an outer fit: `swe_head` scores
+0.127, 0.326, 0.555, 1.035, 1.509 and 2.006 ft at leads 1, 3, 6, 12, 18 and 24 with the bar
+at 10, at 15 and at 20. Where it does bind, on the early inner cutoffs of the blend's weight
+pass, it degrades the weights rather than protecting a fit: the `blend` lead-6 MAE rises from
+0.578 to 0.595 to 0.626 ft. The real repair is a pooled model across issue months and leads,
+not a higher bar on 288 separate fits.
 
 The registered variant `swe_head` adds `head_diff_ft`, the south arm level minus the north
 arm level. The causeway berm controls this difference, so the term carries the management
