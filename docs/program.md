@@ -64,6 +64,9 @@ Columns already in `monthly_covariates` (see the README data section):
   fitted at full scale.
 - Stacking with more than the 2 components in `blend`, or a residual form that regresses
   `ets_damped_s12` residuals at each lead on snowpack anomalies.
+- `swe_head` in place of `swe_regression` as the snowpack component of `blend`. It wins at
+  leads 5 to 12 and loses badly past lead 15, which is the shape the blend is built to
+  handle.
 
 Needs pipeline work first:
 

@@ -143,36 +143,40 @@ uv run gsl-plot [--history-years 10] [--output outputs/gsl_forecast.png]
 
 ## Current results
 
-Walk-forward CV, 157 month-end cutoffs (August 2011 to August 2024), 24-month horizon, training from 1960, data through August 2026. MAE in feet; ratio is MAE divided by `naive_last` MAE at the same horizon. CRPS is the mean pinball loss over q05-q95 with intervals taken from other years' errors (leave-one-year-out).
+Walk-forward CV, 157 month-end cutoffs (August 2011 to August 2024), 24-month horizon, training from 1960, data through August 2026. Experiment 10 in `forecast_experiments.db`; every number below comes from that one run. MAE in feet; the ratio is `blend` MAE divided by `naive_last` MAE at the same horizon. CRPS is the mean pinball loss over q05-q95 with intervals taken from other years' errors (leave-one-year-out).
 
-| Horizon | swe_regression | inflow_chain | ets_damped_s12 | naive_last | Ratio (swe) |
-|---|---|---|---|---|---|
-| 1 | 0.13 | 0.15 | 0.14 | 0.34 | 0.37 |
-| 3 | 0.31 | 0.37 | 0.45 | 0.90 | 0.35 |
-| 6 | 0.55 | 0.67 | 0.82 | 1.33 | 0.41 |
-| 9 | 0.80 | 0.97 | 1.08 | 1.26 | 0.64 |
-| 12 | 1.11 | 1.31 | 1.24 | 1.28 | 0.86 |
-| 18 | 1.65 | 1.87 | 1.65 | 1.91 | 0.86 |
-| 24 | 2.08 | 2.36 | 1.92 | 1.80 | 1.16 |
+| Horizon | blend | swe_regression | swe_head | inflow_chain | ets_damped_s12 | naive_last | Ratio (blend) |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.12 | 0.12 | 0.13 | 0.15 | 0.14 | 0.34 | 0.37 |
+| 3 | 0.31 | 0.31 | 0.32 | 0.37 | 0.45 | 0.90 | 0.35 |
+| 6 | 0.57 | 0.54 | 0.51 | 0.68 | 0.82 | 1.33 | 0.43 |
+| 9 | 0.82 | 0.79 | 0.76 | 0.98 | 1.08 | 1.26 | 0.66 |
+| 12 | 1.08 | 1.07 | 1.06 | 1.32 | 1.24 | 1.28 | 0.84 |
+| 18 | 1.56 | 1.56 | 1.72 | 1.86 | 1.65 | 1.91 | 0.81 |
+| 24 | 1.89 | 1.95 | 2.32 | 2.31 | 1.92 | 1.79 | 1.05 |
 
-CRPS at h=6: swe_regression 0.19, inflow_chain 0.18, ets_damped_s12 0.26, naive_last 0.40.
+No model wins at every lead, which is why `blend` exists. It is the best model at h=1, it matches `swe_regression` through the middle, and it is the best of the three at h=19 to h=22, where the snowpack models have expired and the univariate one has not. Past h=23 nothing beats persistence.
+
+CRPS at h=6: blend 0.19, swe_regression 0.19, swe_head 0.18, inflow_chain 0.18, ets_damped_s12 0.26, naive_last 0.40. Coverage of the 90% interval is 0.87 to 0.89 for every model at h=6 and h=12, against a nominal 0.90.
 
 Headline scalars by issue date (MAE, ft). Issue date means the outlook made from data through the previous month, matching the NRCS schedule.
 
-| Target | Issue | swe_regression | inflow_chain | ets_damped_s12 | naive_last |
-|---|---|---|---|---|---|
-| Spring peak | Jan 1 | 0.84 | 0.82 | 1.01 | 1.62 |
-| Spring peak | Feb 1 | 0.63 | 0.58 | 0.87 | 1.39 |
-| Spring peak | Mar 1 | 0.44 | 0.40 | 0.70 | 1.03 |
-| Spring peak | Apr 1 | 0.27 | 0.25 | 0.41 | 0.62 |
-| Spring peak | May 1 | 0.13 | 0.12 | 0.18 | 0.29 |
-| Water-year end | Jan 1 | 0.91 | 1.09 | 1.28 | 1.23 |
-| Water-year end | Apr 1 | 0.43 | 0.73 | 0.94 | 1.58 |
-| Water-year end | Jun 1 | 0.32 | 0.53 | 0.56 | 1.78 |
-| Water-year end | Jul 1 | 0.29 | 0.37 | 0.55 | 1.61 |
-| Water-year end | Aug 1 | 0.19 | 0.19 | 0.30 | 1.05 |
+| Target | Issue | blend | swe_regression | swe_head | inflow_chain | ets_damped_s12 | naive_last |
+|---|---|---|---|---|---|---|---|
+| Spring peak | Jan 1 | 0.86 | 0.85 | 0.70 | 0.84 | 1.01 | 1.62 |
+| Spring peak | Feb 1 | 0.62 | 0.61 | 0.56 | 0.63 | 0.87 | 1.39 |
+| Spring peak | Mar 1 | 0.45 | 0.44 | 0.42 | 0.42 | 0.70 | 1.03 |
+| Spring peak | Apr 1 | 0.26 | 0.26 | 0.30 | 0.27 | 0.41 | 0.62 |
+| Spring peak | May 1 | 0.14 | 0.14 | 0.12 | 0.12 | 0.18 | 0.29 |
+| Water-year end | Jan 1 | 1.05 | 0.97 | 0.89 | 1.13 | 1.28 | 1.23 |
+| Water-year end | Apr 1 | 0.51 | 0.47 | 0.50 | 0.78 | 0.94 | 1.58 |
+| Water-year end | Jun 1 | 0.32 | 0.32 | 0.36 | 0.53 | 0.56 | 1.78 |
+| Water-year end | Jul 1 | 0.29 | 0.27 | 0.29 | 0.37 | 0.55 | 1.61 |
+| Water-year end | Aug 1 | 0.18 | 0.18 | 0.18 | 0.19 | 0.30 | 1.05 |
 
-Snowpack resolves the winter case: from a January 1 issue the univariate model's peak error was no better than naive; with month-end SWE it roughly halves. After the peak, the summer decline is also predictable: from a June 1 issue the September level is known to about a third of a foot, against 1.8 ft for persistence. `inflow_chain_area` (lake area in place of level in the bucket step) scores within 0.02 ft of `inflow_chain` at every lead, so the hypsometry does not yet add skill. Beyond 18 months the covariate models lose to the univariate ones, since snowpack known today says nothing about the next winter, so the 24-month product should blend toward `ets_damped_s12` at long leads (on the roadmap).
+Snowpack resolves the winter case: from a January 1 issue the univariate model's peak error is no better than naive; with month-end SWE it falls from 1.62 ft to 0.85 ft, and adding the head difference between the arms (`swe_head`) takes it to 0.70 ft. After the peak, the summer decline is also predictable: from a June 1 issue the September level is known to about a third of a foot, against 1.8 ft for persistence. `inflow_chain_area` (lake area in place of level in the bucket step) scores within 0.02 ft of `inflow_chain` at every lead, so the hypsometry does not yet add skill.
+
+`swe_head` is the best model from a January or February issue and the worst of the covariate models past lead 15, so it is in the production set for the in-season scalars while `blend` carries the 24-month path.
 
 ### Against the NRCS record
 

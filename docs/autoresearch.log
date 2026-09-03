@@ -14,3 +14,7 @@
 # 2026-09-02: the estimator changed. ridge_fit now standardises the design and picks alpha
 # per fit by generalised cross-validation. Lines above this one use the old unstandardised
 # fit with alpha=1e-3, which never bound, so they are not comparable with the lines below.
+2026-09-02 | swe_regression | standardised design, alpha by GCV (exp 10) | 0.614 | 0.545 | 0.187 | 0.465 | 0.179 | 1.689 | keep: long leads improve (h18 1.644->1.556, h24 2.084->1.954); wyend_apr slightly worse
+2026-09-02 | inflow_chain | same estimator change (exp 10) | 0.625 | 0.680 | 0.178 | 0.781 | 0.187 | 2.006 | keep: roughly neutral, h24 2.362->2.314
+2026-09-02 | swe_head | + head_diff_ft, re-scored under the new estimator (exp 10) | 0.561 | 0.511 | 0.185 | 0.503 | 0.184 | 1.917 | keep: passes the rule, added to the production set; worst covariate model past lead 15
+2026-09-02 | blend | w(h) on swe_regression, 1-w(h) on ets_damped_s12, w fitted walk-forward and forced non-increasing (exp 10) | 0.620 | 0.567 | 0.190 | 0.514 | 0.183 | 1.673 | keep: best at h1 and h19-h22, matches swe_regression in between; the official model

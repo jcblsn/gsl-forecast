@@ -142,7 +142,31 @@ This design has 2 known weaknesses.
 - The recursion accumulates error. The `c_m` term damps the path, but a stage-1 error at
   lead 3 still moves every later month.
 
-## 5 Estimation
+## 5 The blend
+
+No single model wins at every lead, so the official model mixes 2 of them:
+
+```
+pred(h) = w(h) * swe_regression + (1 - w(h)) * ets_damped_s12
+```
+
+The weight `w(h)` is fitted, not set by hand. A walk-forward pass inside the training data
+scores both models at every lead. The weight is the value on a grid from 0 to 1, in steps of
+0.05, that gives the lowest absolute error at that lead. A pool-adjacent-violators step then
+forces `w(h)` to fall with the lead. So the blend gives up the snowpack term as the snowpack
+signal expires, and it never oscillates.
+
+The inner pass uses the same 15-year cutoff window as the harness in section 8. A wider
+window gives less noisy weights, but it gives a biased answer. Before about 1995 the SNOTEL
+record was too short to fit the snowpack model on. A 30-year window sees that model fail for
+a reason that no longer applies, and gives it 0.60 weight at lead 6, where its true error is
+0.51 ft against 0.82 ft for the univariate model.
+
+The inner pass would refit both models once per outer cutoff, which is 157 times over. A
+prediction at an inner cutoff uses only rows at or before it, so the result is the same at
+every outer cutoff. The code memoises it on the training slice.
+
+## 6 Estimation
 
 Every fit in sections 3 and 4 uses the same estimator, in
 `src/forecasting/multivariate/regression.py`.
@@ -158,9 +182,9 @@ fixed grid. GCV uses only the rows inside the fit, so no future data enters the 
 caller can pass a fixed `alpha` to switch the search off.
 
 The models do not report standard errors. All published uncertainty comes from the
-walk-forward errors in section 6.
+walk-forward errors in section 7.
 
-## 6 Uncertainty
+## 7 Uncertainty
 
 The point forecast gets an empirical interval. For each model and lead, the code takes the
 quantiles of the walk-forward errors `actual - pred` and adds them to the point forecast.
@@ -173,7 +197,7 @@ The scoring holds out 1 year at a time. Each cutoff takes its interval from the 
 other years. A cutoff late in year Y still shares target months with cutoffs early in year
 Y plus 1, so scores at long leads are slightly optimistic.
 
-## 7 Validation
+## 8 Validation
 
 The harness is walk-forward cross-validation in `src/forecasting/cross_validate.py`.
 
@@ -190,17 +214,24 @@ Two caveats apply to every number this harness produces.
    SNOTEL roster grew. A forecast issued in 2013 did not have these values. The live record
    in `forecasts/` is the only vintage-correct score.
 2. Overlapping target months make long-lead interval scores slightly optimistic. See section
-   6.
+   7.
 
-## 8 Current skill
+## 9 Current skill
 
-Numbers come from one cross-validation run. The run identifier is in the README next to the
-tables, so every published number traces to a single experiment.
+Every published number comes from one cross-validation run: experiment 10 in
+`forecast_experiments.db`, 157 cutoffs from 2011-08 to 2024-08, data through 2026-08.
 
 See the README section "Current results" for the MAE table by horizon, the headline table by
-issue date, and the comparison against the published NRCS record.
+issue date, and the comparison against the published NRCS record. In short:
 
-## 9 Open questions
+- `blend` is the best model at lead 1 and at leads 19 to 22, and it matches `swe_regression`
+  in between. It is the model the page shows.
+- `swe_head` is the best model for the spring peak from a January or February issue. Its
+  error at lead 24 is 2.32 ft, against 1.89 ft for `blend`.
+- Past lead 23 no model beats persistence.
+- The 90 percent interval covers 0.87 to 0.89 of the actuals at leads 6 and 12.
+
+## 10 Open questions
 
 1. The forecast path is 24 independent fits. Nothing forces the path to be smooth or the
    intervals to widen with the lead. A path-level constraint may help at long leads.
@@ -212,6 +243,9 @@ issue date, and the comparison against the published NRCS record.
 4. The percent-of-median snowpack columns stop in June. A season-aware feature set, which
    uses snowpack from October to May and soil moisture or year-to-date inflow from June to
    September, is the open experiment.
-5. No model uses the nClimDiv columns. They need the lagged copy from section 2 first.
-6. The forecast issued 2026-09-01 has no `.meta.json` vintage sidecar. The export predates
+5. `swe_head` beats `swe_regression` at leads 5 to 12 and loses badly past lead 15. The blend
+   uses `swe_regression` as its snowpack component. A 3-way blend, or `swe_head` in that
+   place, may take the middle leads.
+6. No model uses the nClimDiv columns. They need the lagged copy from section 2 first.
+7. The forecast issued 2026-09-01 has no `.meta.json` vintage sidecar. The export predates
    that feature. The record stays append-only, so the file is not backfilled.
