@@ -169,10 +169,16 @@ def mae_table(summary: pd.DataFrame, models: list[str], headline_model: str) -> 
 
 
 def interval_table(summary: pd.DataFrame, models: list[str]) -> str:
-    """Mean pinball loss and 90% coverage at the leads the README reports."""
-    if "mean_pinball_loss" not in summary.columns:
+    """Weighted interval score and 90% coverage at the leads the README reports.
+
+    The snapshot also holds the mean pinball loss, which is exactly half the weighted
+    interval score for this symmetric quantile set. The table prints the score that has a
+    recognized name.
+    """
+    column = "wis" if "wis" in summary.columns else "mean_pinball_loss"
+    if column not in summary.columns:
         return ""
-    loss = summary.pivot(index="h", columns="model", values="mean_pinball_loss")
+    loss = summary.pivot(index="h", columns="model", values=column)
     cov = summary.pivot(index="h", columns="model", values="cov90")
     columns = [m for m in models if m in loss.columns]
     lines = [_row(["Lead", *columns]), _row(["---"] * (len(columns) + 1))]
@@ -233,7 +239,7 @@ def render_tables(
     ]
     intervals = interval_table(summary, columns)
     if intervals:
-        parts += ["", "Mean pinball loss and nominal central-90% coverage:", "", intervals]
+        parts += ["", "Weighted interval score and nominal central-90% coverage:", "", intervals]
     if not headline.empty:
         parts += [
             "",
