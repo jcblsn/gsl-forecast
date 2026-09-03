@@ -43,7 +43,7 @@ HEADLINE_ROWS = (
     ),
 )
 
-LEAD_METRICS = ("mae", "rmse", "mae_ratio", "mean_pinball_loss", "cov90")
+LEAD_METRICS = ("mae", "rmse", "mae_ratio", "mean_pinball_loss", "wis", "cov90")
 
 
 def _sha256(path: str) -> str:

@@ -388,9 +388,19 @@ At lead 6 the `blend` band is now 2.89 ft wide from an accumulation issue and 1.
 recession issue, with coverages of 0.85 and 0.85. The rule moves width to where the errors
 are, and it does not manufacture information: coverage stays below 0.90.
 
-Two scores measure the intervals: the unweighted mean pinball loss over the quantile set and
-the share of actuals inside the nominal central 90 percent interval. The loss is only the
-unweighted five-quantile mean, not an integral over the full forecast distribution. `gsl-cv`
+Three scores measure the intervals: the weighted interval score, the unweighted mean pinball
+loss over the quantile set, and the share of actuals inside the nominal central 90 percent
+interval.
+
+The weighted interval score is the recognized finite-quantile approximation to the continuous
+ranked probability score. It adds the absolute error of the median to the interval score of
+each central interval, each weighted by its own alpha, and divides by the number of terms.
+For a symmetric quantile set such as this one it is exactly twice the unweighted mean pinball
+loss, so it adds no information. It is reported because it carries a recognized name and a
+recognized definition, which the mean of 5 pinball losses does not. Neither score is an
+integral over the full forecast distribution.
+
+`gsl-cv`
 prints coverage and width per issue season and writes them to
 `outputs/season_coverage_<stamp>.parquet`, because an aggregate coverage near 0.90 hides a
 season at 0.82 and a season at 0.98.

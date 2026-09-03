@@ -185,6 +185,7 @@ def log_to_tracker(
                 }
                 if "mean_pinball_loss" in row and pd.notna(row["mean_pinball_loss"]):
                     values["mean_pinball_loss"] = float(row["mean_pinball_loss"])
+                    values["wis"] = float(row["wis"])
                     values["cov90"] = float(row["cov90"])
                 run.log_metrics(values, dims={"h": int(h)})
             if headline_summary is not None:
@@ -237,9 +238,9 @@ def print_summary(summary: pd.DataFrame, horizon: int) -> None:
     print("\nMean absolute error (ft) by model and horizon:")
     print(pivot.to_string())
     if "mean_pinball_loss" in summary.columns:
-        loss = summary.pivot(index="model", columns="h", values="mean_pinball_loss").round(3)
+        loss = summary.pivot(index="model", columns="h", values="wis").round(3)
         loss.columns = [f"h={c}" for c in loss.columns]
-        print("\nMean pinball loss (ft, five quantiles) by model and horizon:")
+        print("\nWeighted interval score (ft) by model and horizon:")
         print(loss.to_string())
     print("\nBest model at each horizon (MAE ratio to naive_last in parentheses):")
     for h in range(1, horizon + 1):

@@ -7,9 +7,11 @@ from src.forecasting.quantiles import (
     SEASON_SCALE_PRIOR,
     apply_intervals,
     error_quantiles,
+    interval_pairs,
     leave_one_year_out_scores,
     pinball,
     probabilistic_scores,
+    weighted_interval_score,
     with_season,
 )
 
@@ -117,6 +119,7 @@ def test_scores_have_expected_shape(cv_df):
         "model",
         "h",
         "mean_pinball_loss",
+        "wis",
         "cov90",
         "width90",
         "n_scored",
@@ -132,3 +135,29 @@ def test_scores_have_expected_shape(cv_df):
     assert (s["cov90"] >= 0.8).all()
     loyo = leave_one_year_out_scores(cv_df)
     assert set(loyo["h"]) == {1, 2}
+
+
+def test_wis_is_twice_the_mean_pinball_loss_for_a_symmetric_quantile_set(cv_df):
+    """WIS carries a recognized name for the number the 5 pinball losses already gave."""
+    scored = apply_intervals(cv_df, error_quantiles(cv_df), "m")
+    s = probabilistic_scores(scored)
+    assert (s["wis"] / s["mean_pinball_loss"]).round(9).eq(2.0).all()
+
+
+def test_wis_penalises_an_actual_outside_the_band():
+    """The penalty is 2/alpha times the distance outside, so a wide miss costs more."""
+    inside = pd.DataFrame(
+        {"actual": [0.0], "q05": [-1.0], "q25": [-0.5], "q50": [0.0], "q75": [0.5], "q95": [1.0]}
+    )
+    outside = inside.assign(actual=[3.0])
+    # Inside: (0.5*0 + 0.05*2 + 0.25*1) / 2.5. Outside adds 2/alpha per foot beyond each edge.
+    assert weighted_interval_score(np.array([0.0]), inside)[0] == pytest.approx(0.14)
+    assert weighted_interval_score(np.array([3.0]), outside)[0] == pytest.approx(2.54)
+
+
+def test_interval_pairs_reads_the_central_intervals():
+    assert interval_pairs((0.05, 0.25, 0.5, 0.75, 0.95)) == [
+        (0.05, 0.95, 0.1),
+        (0.25, 0.75, 0.5),
+    ]
+    assert interval_pairs((0.1, 0.5, 0.9)) == [(0.1, 0.9, 0.2)]

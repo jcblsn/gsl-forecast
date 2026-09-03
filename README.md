@@ -64,6 +64,7 @@ The forecast and how it is scored:
 | Walk-forward cross-validation | Repeat the whole procedure at many past cutoffs, using only the data available at each one, then score the results |
 | MAE | Mean absolute error, in feet |
 | Mean pinball loss | The unweighted mean of pinball losses at q05, q25, q50, q75 and q95. Lower is better |
+| WIS | The weighted interval score, the recognized finite-quantile approximation to the continuous ranked probability score. For this symmetric quantile set it is exactly twice the mean pinball loss. Lower is better |
 | Coverage | The share of actual values inside the nominal central 90% interval |
 | Data vintage | The state of the input data on the issue date. Each issue records the SHA-256 of the whole modeling table, its column list, the SHA-256 of the resolved configuration and the SNOTEL roster version, because a maximum date says when the data stops and not what the values were |
 | Headline model | The model that supplies the public number, named in `config/config.json` |

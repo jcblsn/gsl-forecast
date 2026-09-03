@@ -141,6 +141,43 @@ def pinball(actual: np.ndarray, pred_q: np.ndarray, q: float) -> np.ndarray:
     return np.maximum(q * diff, (q - 1) * diff)
 
 
+def interval_pairs(quantiles=QUANTILES) -> list[tuple[float, float, float]]:
+    """The central intervals a quantile set forms, as (lower level, upper level, alpha)."""
+    levels = sorted(quantiles)
+    pairs = []
+    for low in levels:
+        if low >= 0.5:
+            break
+        if any(abs(high - (1.0 - low)) < 1e-9 for high in levels):
+            pairs.append((low, 1.0 - low, 2.0 * low))
+    return pairs
+
+
+def weighted_interval_score(
+    actual: np.ndarray, scored: pd.DataFrame, quantiles=QUANTILES
+) -> np.ndarray:
+    """The weighted interval score of Bracher and others (2021), 1 value per row.
+
+    WIS is the recognized finite-quantile approximation to the continuous ranked probability
+    score. It adds the absolute error of the median to the interval score of each central
+    interval, each weighted by its own alpha, and divides by the number of terms.
+
+    For a symmetric quantile set such as the default 5, WIS is exactly twice the unweighted
+    mean pinball loss. It is reported because it carries a recognized name and a recognized
+    definition, which the mean of 5 pinball losses does not.
+    """
+    pairs = interval_pairs(quantiles)
+    if not pairs or not any(abs(q - 0.5) < 1e-9 for q in quantiles):
+        raise ValueError("WIS needs the median and at least 1 pair of symmetric quantiles")
+    total = 0.5 * np.abs(actual - scored[qcol(0.5)].to_numpy())
+    for low, high, alpha in pairs:
+        lower = scored[qcol(low)].to_numpy()
+        upper = scored[qcol(high)].to_numpy()
+        penalty = np.maximum(lower - actual, 0.0) + np.maximum(actual - upper, 0.0)
+        total = total + (alpha / 2.0) * ((upper - lower) + (2.0 / alpha) * penalty)
+    return total / (len(pairs) + 0.5)
+
+
 def probabilistic_scores(
     scored: pd.DataFrame, quantiles=QUANTILES, by: tuple[str, ...] = ("model", "h")
 ) -> pd.DataFrame:
@@ -150,6 +187,7 @@ def probabilistic_scores(
     )
     frame = scored[list(by)].copy()
     frame["mean_pinball_loss"] = losses.mean(axis=1)
+    frame["wis"] = weighted_interval_score(scored["actual"].to_numpy(), scored, quantiles)
     frame["in90"] = (scored["actual"] >= scored[qcol(0.05)]) & (
         scored["actual"] <= scored[qcol(0.95)]
     )
@@ -158,6 +196,7 @@ def probabilistic_scores(
         frame.groupby(list(by))
         .agg(
             mean_pinball_loss=("mean_pinball_loss", "mean"),
+            wis=("wis", "mean"),
             cov90=("in90", "mean"),
             width90=("width90", "mean"),
             n_scored=("in90", "size"),
