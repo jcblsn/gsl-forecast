@@ -2,12 +2,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.forecasting.cutoffs import SEASON_MONTHS
 from src.forecasting.quantiles import (
+    SEASON_SCALE_PRIOR,
     apply_intervals,
     error_quantiles,
     leave_one_year_out_scores,
     pinball,
     probabilistic_scores,
+    with_season,
 )
 
 
@@ -29,9 +32,70 @@ def cv_df():
     return pd.DataFrame(rows)
 
 
+@pytest.fixture
+def seasonal_cv_df():
+    """Wide errors from an accumulation issue and narrow errors from a recession issue."""
+    rng = np.random.default_rng(7)
+    scale = {1: 4.0, 8: 0.5}
+    rows = [
+        {
+            "model": "m",
+            "cutoff": pd.Timestamp(year=year, month=month, day=1),
+            "h": h,
+            "pred": 4195.0,
+            "actual": 4195.0 + rng.normal(0, scale[month]),
+        }
+        for year in range(1990, 2020)
+        for month in scale
+        for h in (1, 2)
+    ]
+    return pd.DataFrame(rows)
+
+
 def test_error_quantiles_widen_with_horizon(cv_df):
-    eq = error_quantiles(cv_df).set_index("h")
+    eq = error_quantiles(cv_df).query("issue_season == 'melt'").set_index("h")
     assert eq.loc[2, "q95"] - eq.loc[2, "q05"] > eq.loc[1, "q95"] - eq.loc[1, "q05"]
+
+
+def test_error_quantiles_carry_every_season(cv_df):
+    """A forecast issued in a season the cross-validation never covered still gets a band."""
+    eq = error_quantiles(cv_df)
+    assert set(eq["issue_season"]) == set(SEASON_MONTHS)
+
+
+def test_the_band_is_wider_in_the_season_whose_errors_are_wider(seasonal_cv_df):
+    eq = error_quantiles(seasonal_cv_df).set_index(["issue_season", "h"])
+    width = eq["q95"] - eq["q05"]
+    assert width.loc["accumulation", 1] > 2 * width.loc["recession", 1]
+
+
+def _by_season(df, prior):
+    eq = error_quantiles(df, prior=prior)
+    scored = pd.concat(
+        [
+            apply_intervals(g, eq, "m", season)
+            for season, g in with_season(df).groupby("issue_season")
+        ],
+        ignore_index=True,
+    )
+    return probabilistic_scores(scored, by=("issue_season", "h")).set_index(["issue_season", "h"])
+
+
+def test_season_calibration_narrows_the_band_where_the_errors_are_narrow(seasonal_cv_df):
+    """One band over every issue month is too wide in one season and too narrow in another."""
+    pooled = _by_season(seasonal_cv_df, prior=1e12)
+    season = _by_season(seasonal_cv_df, prior=SEASON_SCALE_PRIOR)
+
+    assert pooled.loc["accumulation", 1]["width90"] == pytest.approx(
+        pooled.loc["recession", 1]["width90"]
+    )
+    assert season.loc["recession", 1]["width90"] < 0.5 * season.loc["accumulation", 1]["width90"]
+
+    def spread(table):
+        lead_one = table.xs(1, level="h")["cov90"]
+        return lead_one.max() - lead_one.min()
+
+    assert spread(season) < spread(pooled)
 
 
 def test_apply_intervals_adds_columns(cv_df):
@@ -49,7 +113,14 @@ def test_pinball_is_asymmetric():
 def test_scores_have_expected_shape(cv_df):
     scored = apply_intervals(cv_df, error_quantiles(cv_df), "m")
     s = probabilistic_scores(scored)
-    assert list(s.columns) == ["model", "h", "mean_pinball_loss", "cov90"]
+    assert list(s.columns) == [
+        "model",
+        "h",
+        "mean_pinball_loss",
+        "cov90",
+        "width90",
+        "n_scored",
+    ]
     losses = np.column_stack(
         [
             pinball(scored["actual"].to_numpy(), scored[f"q{q:02d}"].to_numpy(), q / 100)

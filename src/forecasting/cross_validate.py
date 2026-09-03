@@ -16,7 +16,7 @@ from src.forecasting.headline import (
     print_headline,
     summarize_headline,
 )
-from src.forecasting.quantiles import leave_one_year_out_scores
+from src.forecasting.quantiles import leave_one_year_out_scores, season_scores
 from src.forecasting.registry import BASELINE, all_forecasters
 
 
@@ -187,6 +187,23 @@ def log_to_tracker(
                     run.log_metrics(values, dims=dims)
 
 
+def print_season_coverage(by_season: pd.DataFrame, model: str, leads=(1, 3, 6, 12, 24)) -> None:
+    """Coverage and band width per issue season, for one model.
+
+    An aggregate coverage near 0.90 hides a season at 0.83 and a season at 0.98, so this is
+    the table that says whether the band is calibrated where a decision is made.
+    """
+    rows = by_season[(by_season["model"] == model) & (by_season["h"].isin(leads))]
+    if rows.empty:
+        return
+    print(f"\nNominal central 90% interval for {model}, by issue season:")
+    for value, title in (("cov90", "coverage"), ("width90", "width (ft)")):
+        pivot = rows.pivot(index="issue_season", columns="h", values=value).round(3)
+        pivot.columns = [f"h={c}" for c in pivot.columns]
+        print(f"  {title}")
+        print(pivot.to_string())
+
+
 def print_summary(summary: pd.DataFrame, horizon: int) -> None:
     pivot = summary.pivot(index="model", columns="h", values="mae").round(3)
     pivot.columns = [f"h={c}" for c in pivot.columns]
@@ -259,6 +276,7 @@ def run_cross_validation(
     headline_summary = summarize_headline(headline)
     prob = leave_one_year_out_scores(cv_df)
     summary = summary.merge(prob, on=["model", "h"], how="left")
+    by_season = season_scores(cv_df)
 
     stamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
     cutoff_desc = split_name if n_cutoffs is None else f"{n_cutoffs} sampled from {split_name}"
@@ -293,6 +311,7 @@ def run_cross_validation(
     per_cutoff_path = os.path.join(output_dir, f"cv_results_{stamp}.parquet")
     cv_df.to_parquet(per_cutoff_path, index=False)
     headline.to_parquet(os.path.join(output_dir, f"headline_{stamp}.parquet"), index=False)
+    by_season.to_parquet(os.path.join(output_dir, f"season_coverage_{stamp}.parquet"), index=False)
     # The run records where the parquet went, so asking the tracker replaces passing a path
     # between commands in a text file. The path and not the bytes: the predictions table
     # already holds the same rows, keyed by cutoff and lead.
@@ -312,6 +331,7 @@ def run_cross_validation(
         logging.info(f"Saved CV plots to {output_dir}")
 
     print_summary(summary, horizon)
+    print_season_coverage(by_season, fc.get("headline_model") or BASELINE)
     print_headline(headline_summary)
     return summary
 

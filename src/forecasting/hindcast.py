@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
+from src.forecasting.cutoffs import issue_season
 from src.forecasting.data import load_monthly_data
 from src.forecasting.quantiles import apply_intervals, error_quantiles
 from src.forecasting.registry import all_forecasters
@@ -70,7 +71,7 @@ def hindcast_frame(
         preds = f.fit(train).predict(horizon).rename(columns={"model_name": "model"})
         preds["h"] = range(1, horizon + 1)
         if eq is not None and f.name in set(eq["model"]):
-            preds = apply_intervals(preds, eq, f.name)
+            preds = apply_intervals(preds, eq, f.name, issue_season(cutoff))
         elif eq is not None:
             logging.warning(
                 f"{f.name} has no interval: the cross-validation file does not hold it. "

@@ -34,7 +34,7 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from ..base import Forecaster
-from ..cutoffs import valid_cutoffs
+from ..cutoffs import SEASON_MONTHS, issue_season, valid_cutoffs
 from ..univariate.exponential_smoothing import HoltWintersForecaster
 from .regression import TARGET_COL, TIME_COL
 from .swe_regression import SweRegressionForecaster
@@ -47,20 +47,8 @@ SIMPLEX_STEP = 0.05
 FULL_WEIGHT_LEAD = 6
 ZERO_WEIGHT_LEAD = 24
 
-SEASON_MONTHS = {
-    "accumulation": {11, 12, 1, 2, 3},
-    "melt": {4, 5, 6},
-    "recession": {7, 8, 9, 10},
-}
-
 _CACHE: dict[tuple, np.ndarray] = {}
 _CACHE_LIMIT = 4000
-
-
-def issue_season(cutoff: pd.Timestamp) -> str:
-    """The water-year stage of the issue that follows a cutoff."""
-    issue_month = pd.Timestamp(cutoff).month % 12 + 1
-    return next(name for name, months in SEASON_MONTHS.items() if issue_month in months)
 
 
 def simplex_grid(k: int, step: float) -> np.ndarray:

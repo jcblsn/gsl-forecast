@@ -26,6 +26,7 @@ def test_export_and_verify_roundtrip(tmp_path):
     cv = pd.DataFrame(
         {
             "model": ["m"] * 4,
+            "cutoff": pd.to_datetime(["2025-08-01", "2024-08-01"] * 2),
             "h": [1, 1, 2, 2],
             "pred": [0, 0, 0, 0],
             "actual": [-0.2, 0.2, -0.5, 0.5],

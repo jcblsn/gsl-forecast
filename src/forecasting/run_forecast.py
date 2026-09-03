@@ -13,11 +13,9 @@ from experiment_tracker import ExperimentTracker
 
 from src.config import load_config
 from src.forecasting.base import Forecaster
+from src.forecasting.cutoffs import issue_season
 from src.forecasting.data import load_monthly_data
-from src.forecasting.multivariate.blend import (
-    BlendForecaster,
-    issue_season,
-)
+from src.forecasting.multivariate.blend import BlendForecaster
 from src.forecasting.quantiles import apply_intervals, error_quantiles
 from src.forecasting.registry import production_forecasters
 
@@ -373,9 +371,13 @@ def export_forecasts(
     out["issue"] = origin + pd.DateOffset(months=1)
     out["h"] = (out["month"].dt.year - origin.year) * 12 + out["month"].dt.month - origin.month
     if cv_parquet:
+        # The band is calibrated for the season this issue falls in, because the errors are
+        # strongly heteroskedastic by issue season.
+        season = issue_season(origin)
         eq = error_quantiles(pd.read_parquet(cv_parquet))
         out = pd.concat(
-            [apply_intervals(g, eq, m) for m, g in out.groupby("model")], ignore_index=True
+            [apply_intervals(g, eq, m, season) for m, g in out.groupby("model")],
+            ignore_index=True,
         )
         require_intervals(out, cv_parquet)
     out = out.sort_values(["model", "h"]).reset_index(drop=True)

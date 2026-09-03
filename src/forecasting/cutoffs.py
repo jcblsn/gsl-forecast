@@ -10,6 +10,21 @@ import random
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
+# The water-year stage of an issue. The blend fits one weight curve per stage, and the
+# interval layer scales its band per stage, because the errors are strongly heteroskedastic
+# by stage.
+SEASON_MONTHS = {
+    "accumulation": {11, 12, 1, 2, 3},
+    "melt": {4, 5, 6},
+    "recession": {7, 8, 9, 10},
+}
+
+
+def issue_season(cutoff: pd.Timestamp) -> str:
+    """The water-year stage of the issue that follows a cutoff."""
+    issue_month = pd.Timestamp(cutoff).month % 12 + 1
+    return next(name for name, months in SEASON_MONTHS.items() if issue_month in months)
+
 
 def valid_cutoffs(data: pd.DataFrame, history_years: int, horizon: int) -> list[pd.Timestamp]:
     """Every month in the last `history_years` that has `horizon` months of actuals after it."""

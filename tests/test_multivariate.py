@@ -5,13 +5,12 @@ import pandas as pd
 import pytest
 from dateutil.relativedelta import relativedelta
 
+from src.forecasting.cutoffs import SEASON_MONTHS, issue_season
 from src.forecasting.multivariate.blend import _CACHE as blend_cache
 from src.forecasting.multivariate.blend import (
-    SEASON_MONTHS,
     BlendForecaster,
     covariate_share,
     default_weights,
-    issue_season,
     monotone_weight_path,
     simplex_grid,
 )

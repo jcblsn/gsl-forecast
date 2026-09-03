@@ -353,13 +353,39 @@ The point forecast gets an empirical interval. For each model and lead, the code
 quantiles of the walk-forward errors `actual - pred` and adds them to the point forecast.
 The quantile set is 0.05, 0.25, 0.50, 0.75 and 0.95.
 
+The band is conditional on the issue season. The errors are strongly heteroskedastic by
+season: 1 band over every issue month gave the `blend` a coverage of 0.82 at lead 6 from an
+accumulation issue and 0.98 from a recession issue, both with the same width of 2.31 ft.
+
+A season cell holds about 13 to 22 errors at 1 lead. That is enough to estimate a centre and
+a width, and too few to read a 5% or a 95% quantile from. Therefore the centre and the width
+are conditional on the season and the shape of the tail is pooled:
+
+1. The centre of a season is the median of its errors, and the width is their mean absolute
+   deviation from that median.
+2. Each is pulled toward its pooled value by `n / (n + 10)`, where `n` counts the errors in
+   the cell. A season with few errors keeps close to the pooled value.
+3. Every error is divided by the centre and the width of its own season, and the quantiles
+   of those standardised errors are pooled over the seasons.
+4. A season's band is its centre plus its width multiplied by that pooled shape.
+
+Standardising before pooling matters. Pooling the raw errors would give every season the
+tail of whichever season has the widest errors, so a band scaled down for a narrow season
+would keep a skew the narrow season does not have.
+
+At lead 6 the `blend` band is now 2.89 ft wide from an accumulation issue and 1.65 ft from a
+recession issue, with coverages of 0.85 and 0.85. The rule moves width to where the errors
+are, and it does not manufacture information: coverage stays below 0.90.
+
 Two scores measure the intervals: the unweighted mean pinball loss over the quantile set and
 the share of actuals inside the nominal central 90 percent interval. The loss is only the
-unweighted five-quantile mean, not an integral over the full forecast distribution.
+unweighted five-quantile mean, not an integral over the full forecast distribution. `gsl-cv`
+prints coverage and width per issue season and writes them to
+`outputs/season_coverage_<stamp>.parquet`, because an aggregate coverage near 0.90 hides a
+season at 0.82 and a season at 0.98.
 
 The displayed point forecast is fitted independently from this retrospective calibration.
-It is not necessarily the q50 interval value. Aggregate observed coverage is about 87–89%
-at the reported key leads, rather than 90%, and coverage varies by issue season.
+It is not necessarily the q50 interval value.
 
 The scoring holds out 1 year at a time. Each cutoff takes its interval from the errors of
 other years. A cutoff late in year Y still shares target months with cutoffs early in year
