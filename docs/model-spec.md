@@ -91,6 +91,16 @@ roster's declared basin weights.
 The reservoir roster is still discovered. It grows as dams are built, so early storage sums
 are smaller for a physical reason.
 
+### 2.0.2 Discharge day coverage
+
+A month of discharge needs at least 25 daily values. The sum of those values is then scaled
+to the whole month, which assumes the missing days flowed like the days that reported. Before
+this rule a 28-day sum was published as a 31-day volume. `inflow_day_coverage` records the
+lowest share of calendar days any inflow gauge reported that month, so a reader can see how
+much of a value the scaling supplied. In the current database the lowest share among months
+that pass the threshold is 28 of 31 days, so the rule corrects a latent defect and not the
+published scores.
+
 ## 2.1 The endpoint seasonal baseline
 
 `endpoint_seasonal` is the strong state-only baseline. Within each fit it compares the last

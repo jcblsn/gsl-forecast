@@ -348,19 +348,21 @@ def test_roster_rejects_weights_that_do_not_sum_to_one(monkeypatch):
             cov.ingest_snotel(conn, cfg["snotel"])
 
 
-def snow_only_db(daily_rows, roster_rows):
-    """A database with hand-written snow rows, so one aggregation rule can be checked."""
+def stub_db(daily_rows, roster_rows):
+    """A database with hand-written rows, so one aggregation rule can be checked alone."""
     conn = duckdb.connect(":memory:")
     conn.execute(
         "CREATE TABLE snotel_daily (station_triplet VARCHAR, d DATE, wteq_in FLOAT, "
         "prec_in FLOAT, sms_8_pct FLOAT, wteq_median_in FLOAT, prec_median_in FLOAT)"
     )
-    conn.executemany("INSERT INTO snotel_daily VALUES (?, ?, ?, ?, ?, ?, ?)", daily_rows)
+    if daily_rows:
+        conn.executemany("INSERT INTO snotel_daily VALUES (?, ?, ?, ?, ?, ?, ?)", daily_rows)
     conn.execute(
         "CREATE TABLE snotel_roster (roster_version VARCHAR, station_triplet VARCHAR, "
         "basin VARCHAR, basin_weight DOUBLE)"
     )
-    conn.executemany("INSERT INTO snotel_roster VALUES (?, ?, ?, ?)", roster_rows)
+    if roster_rows:
+        conn.executemany("INSERT INTO snotel_roster VALUES (?, ?, ?, ?)", roster_rows)
     conn.execute("CREATE TABLE usgs_discharge_daily (site_id VARCHAR, d DATE, discharge_cfs FLOAT)")
     conn.execute(
         "CREATE TABLE reservoir_monthly (station_triplet VARCHAR, month DATE, storage_kaf FLOAT)"
@@ -381,7 +383,7 @@ def test_month_end_takes_the_last_valid_day_in_the_window():
         ("1:UT:SNTL", "2020-01-30", 5.0, None, None, 10.0, None),
         ("2:UT:SNTL", "2020-01-31", 7.0, None, None, 10.0, None),
     ]
-    with snow_only_db(rows, [("v", "1:UT:SNTL", "bear", 1.0)]) as conn:
+    with stub_db(rows, [("v", "1:UT:SNTL", "bear", 1.0)]) as conn:
         cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear"])
         row = conn.execute("SELECT swe_eom_bear, n_snotel_sites FROM monthly_covariates").fetchone()
     assert row == (pytest.approx(5.0), 1)
@@ -392,7 +394,7 @@ def test_pooled_columns_use_the_declared_basin_weights():
     rows = [("b1", "2020-01-31", 3.0, None, None, None, None)]
     rows += [(f"a{i}", "2020-01-31", 9.0, None, None, None, None) for i in range(3)]
     roster = [("v", "b1", "weber", 0.25)] + [("v", f"a{i}", "bear", 0.75) for i in range(3)]
-    with snow_only_db(rows, roster) as conn:
+    with stub_db(rows, roster) as conn:
         cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear", "weber"])
         row = conn.execute("SELECT swe_eom_gsl, n_snotel_sites FROM monthly_covariates").fetchone()
     assert row == (pytest.approx(0.75 * 9.0 + 0.25 * 3.0), 4)
@@ -406,9 +408,34 @@ def test_each_variable_counts_its_own_reporting_sites():
         ("c", "2020-01-31", 3.0, None, 20.0, None, None),
     ]
     roster = [("v", "a", "bear", 0.5), ("v", "b", "bear", 0.5), ("v", "c", "weber", 0.5)]
-    with snow_only_db(rows, roster) as conn:
+    with stub_db(rows, roster) as conn:
         cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear", "weber"])
         row = conn.execute(
             "SELECT sms_eom_gsl, n_snotel_sites, n_snotel_sms FROM monthly_covariates"
         ).fetchone()
     assert row == (pytest.approx(30.0), 3, 2)
+
+
+def flow_db(daily_rows):
+    conn = stub_db([], [])
+    conn.executemany("INSERT INTO usgs_discharge_daily VALUES (?, ?, ?)", daily_rows)
+    return conn
+
+
+def test_a_partial_month_of_discharge_is_scaled_and_declares_its_coverage():
+    """A 28-day sum is not a 31-day volume, and a reader must be able to see the gap."""
+    rows = [("10126000", f"2020-01-{d:02d}", 1000.0) for d in range(1, 29)]
+    with flow_db(rows) as conn:
+        cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear"])
+        row = conn.execute(
+            "SELECT inflow_kaf_bear, inflow_day_coverage FROM monthly_covariates"
+        ).fetchone()
+    assert row[0] == pytest.approx(1000 * 31 * 86400 / 43560 / 1000)
+    assert row[1] == pytest.approx(28 / 31)
+
+
+def test_a_month_below_the_day_threshold_is_dropped():
+    rows = [("10126000", f"2020-01-{d:02d}", 1000.0) for d in range(1, cov.MIN_FLOW_DAYS)]
+    with flow_db(rows) as conn:
+        cov.transform_covariates(conn, CFG["usgs_discharge"], ["bear"])
+        assert conn.execute("SELECT COUNT(*) FROM monthly_covariates").fetchone() == (0,)

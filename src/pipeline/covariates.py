@@ -25,6 +25,9 @@ from src.pipeline.usgs import (
 
 AWDB = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1"
 DISCHARGE_PARAMETER = "00060"
+# A month of discharge needs this many daily values. The sum is then scaled to the whole
+# month, which assumes the missing days flowed like the days that reported.
+MIN_FLOW_DAYS = 25
 ELEVATION_PARAMETER = "62614"
 NORTH_ARM_TABLE = "usgs_north_arm_elevation_daily"
 SNOTEL_ELEMENTS = ("WTEQ", "PREC", "SMS:-8")
@@ -402,6 +405,7 @@ def transform_covariates(
         ]
     )
     total = " + ".join(f"inflow_kaf_{river}" for river in inflow)
+    inflow_sites = ", ".join(f"'{site}'" for site in inflow.values())
     per_basin = {
         "swe_eom": "swe",
         "prec_wy_eom": "prec",
@@ -467,16 +471,25 @@ def transform_covariates(
                    ANY_VALUE(roster_version) AS snotel_roster_version
             FROM snow GROUP BY month
         ),
-        flow AS (
+        flow_days AS (
             SELECT DATE_TRUNC('month', d) AS month, site_id,
-                   SUM(discharge_cfs) * 86400.0 / 43560.0 / 1000.0 AS kaf, COUNT(*) AS n_days
+                   SUM(discharge_cfs) AS cfs_days, COUNT(*) AS n_days,
+                   DAY(LAST_DAY(DATE_TRUNC('month', d))) AS month_days
             FROM usgs_discharge_daily
             GROUP BY ALL
         ),
+        flow AS (
+            SELECT month, site_id,
+                   cfs_days / n_days * month_days * 86400.0 / 43560.0 / 1000.0 AS kaf,
+                   n_days::DOUBLE / month_days AS day_coverage
+            FROM flow_days WHERE n_days >= {MIN_FLOW_DAYS}
+        ),
         flow_wide AS (
             SELECT month,
-                   {flow_cols}
-            FROM flow WHERE n_days >= 25 GROUP BY month
+                   {flow_cols},
+                   MIN(day_coverage) FILTER (site_id IN ({inflow_sites}))
+                       AS inflow_day_coverage
+            FROM flow GROUP BY month
         ),
         res AS (
             SELECT month, basin, SUM(storage_kaf) AS kaf, COUNT(*) AS n
