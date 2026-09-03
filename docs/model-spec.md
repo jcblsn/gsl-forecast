@@ -88,6 +88,18 @@ of reporting sites, so the count of reporting SWE sites no longer weights the pr
 and soil-moisture averages. Every pooled (`_gsl`) column averages the basins under the
 roster's declared basin weights.
 
+#### What the fixed roster costs
+
+The fix costs accuracy on the development cohort. Against the discovered roster, `swe_head`
+MAE rises by 0.002, 0.020, 0.034, 0.034, 0.024 and 0.024 ft at leads 1, 3, 6, 12, 18 and 24,
+and `swe_regression` by 0.002, 0.013, 0.026, 0.040, 0.023 and 0.049 ft.
+
+The change is kept anyway, for 3 reasons. The cost is well inside the block-bootstrap
+interval of section 8.1, which spans about 0.27 ft at lead 6. The development cohort has
+guided many earlier decisions, so a 0.03 ft edge on it is weak evidence. And the discovered
+index counts 30 sites in 1990 and 55 in 2026, so its composition changes through the record
+and is densest in the recent years the cohort scores most.
+
 The reservoir roster is still discovered. It grows as dams are built, so early storage sums
 are smaller for a physical reason.
 
