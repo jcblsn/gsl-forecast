@@ -15,7 +15,7 @@ Horizons: 1-6 months is the operational window where snowpack makes the lake pre
 
 ## Why
 
-A survey of existing forecasts is in `docs/operational-forecasts-survey.md` and the literature review in `docs/literature-review.md`. In short:
+The statistical specification of the models, and the dates each input is available on, are in `docs/model-spec.md`. A survey of existing forecasts is in `docs/operational-forecasts-survey.md` and the literature review in `docs/literature-review.md`. In short:
 
 - The only routine, dated product that targets lake elevation is the NRCS Utah Snow Survey's advisory rise-to-peak outlook, issued January through May since 2024. Its April-issue peak error was 0.1-0.4 ft in 2024-2026 against a stated band of about plus or minus half a foot. It stops in May, so nothing operational forecasts the autumn low or anything beyond six months.
 - CBRFC issues ensemble streamflow forecasts for the tributaries (about 16-18% April error on April-July volume) but no lake product.
@@ -256,7 +256,7 @@ data/
   benchmarks/nrcs_outlooks.csv   # Published NRCS outlooks vs actual peaks, 2024-2026
   external/gsl_south_arm_hypsometry.csv  # USGS 2023 elevation-area-volume table, 0.1 ft steps
 forecasts/              # Dated forecast CSVs and meta sidecars committed by the monthly workflow
-docs/                   # Surveys, literature review, and the autoresearch program
+docs/                   # Model spec, surveys, literature review, and the autoresearch program
 outputs/                # gitignored: CV parquet and PNGs
 ```
 
