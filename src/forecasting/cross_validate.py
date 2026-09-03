@@ -65,15 +65,11 @@ def evaluate_at_cutoff(
     if train_start:
         train = train[train["month"] >= pd.Timestamp(train_start)]
     train = train.copy()
-    forecast_months = pd.date_range(
-        cutoff + pd.DateOffset(months=1), periods=horizon, freq="MS"
-    )
+    forecast_months = pd.date_range(cutoff + pd.DateOffset(months=1), periods=horizon, freq="MS")
     data_end = pd.to_datetime(data["month"]).max()
     expected_months = forecast_months[forecast_months <= data_end]
     actuals = (
-        data.assign(month=pd.to_datetime(data["month"]))
-        .set_index("month")
-        .reindex(expected_months)
+        data.assign(month=pd.to_datetime(data["month"])).set_index("month").reindex(expected_months)
     )
     missing_actuals = expected_months[actuals["avg_elevation"].isna()]
     if len(missing_actuals):
@@ -331,7 +327,7 @@ def main() -> None:
     )
     parser.add_argument("--horizon", type=int, help="Must equal the named split's fixed horizon")
     parser.add_argument("--split", help="Named evaluation split (default: configured development)")
-    parser.add_argument("--train-start", help="Earliest training date, e.g. 1960-01-01")
+    parser.add_argument("--train-start", help="Earliest training date, e.g. 1989-10-01")
     parser.add_argument("--experiment-db", help="Path to experiment database")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", help="Directory for parquet and PNG outputs")

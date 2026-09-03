@@ -8,7 +8,7 @@
     "path": "./data/gsl.db"
   },
   "forecasting": {
-    "train_start": "1960-01-01",
+    "train_start": "1989-10-01",
     "horizon": 24,
     "experiment_db": "forecast_experiments.db",
     "output_dir": "./outputs",

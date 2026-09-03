@@ -14,15 +14,36 @@ SOUTH_ARM_TABLE = "usgs_water_surface_elevation_daily"
 def transform(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute(f"""
         CREATE OR REPLACE TABLE monthly_elevation AS
-        SELECT
-            DATE_TRUNC('month', d) AS month,
-            AVG(elevation) AS avg_elevation,
-            MIN(elevation) AS min_elevation,
-            MAX(elevation) AS max_elevation,
-            COUNT(*) AS observation_count
-        FROM {SOUTH_ARM_TABLE}
-        WHERE d < DATE_TRUNC('month', CURRENT_DATE)
-        GROUP BY month
+        WITH complete_months AS (
+            SELECT *
+            FROM {SOUTH_ARM_TABLE}
+            WHERE d < DATE_TRUNC('month', CURRENT_DATE)
+        )
+        SELECT DATE_TRUNC('month', d) AS month,
+               AVG(elevation) AS avg_elevation,
+               MIN(elevation) AS min_elevation,
+               MAX(elevation) AS max_elevation,
+               COUNT(*) AS observation_count,
+               ARG_MAX(elevation, d) AS last_elevation,
+               MAX(d) AS last_observation_date,
+               DATE_DIFF('day', MAX(d), LAST_DAY(MAX(d))) AS endpoint_age_days,
+               MEDIAN(elevation) FILTER (
+                   WHERE d >= LAST_DAY(d) - INTERVAL 2 DAY
+               ) AS endpoint_3d_median,
+               COUNT(*) FILTER (
+                   WHERE d >= LAST_DAY(d) - INTERVAL 2 DAY
+               ) AS endpoint_3d_observation_count,
+               MEDIAN(elevation) FILTER (
+                   WHERE d >= LAST_DAY(d) - INTERVAL 6 DAY
+               ) AS endpoint_7d_median,
+               COUNT(*) FILTER (
+                   WHERE d >= LAST_DAY(d) - INTERVAL 6 DAY
+               ) AS endpoint_7d_observation_count,
+               COUNT(*) FILTER (
+                   WHERE LOWER(COALESCE(qualifiers, '')) LIKE '%provisional%'
+               ) AS provisional_observation_count
+        FROM complete_months
+        GROUP BY DATE_TRUNC('month', d)
         ORDER BY month
     """)
 

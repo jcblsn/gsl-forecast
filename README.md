@@ -149,7 +149,11 @@ Fetches the daily south-arm elevation, then the covariates (see the [Data](#data
 uv run --frozen gsl-pipeline [--skip-covariates]
 ```
 
-Elevation commits in its own transaction before the covariates, so an AWDB outage leaves the target series current. The current calendar month is excluded from `monthly_elevation` so a partial month is never treated as a full-month average.
+Elevation commits in its own transaction before the covariates, so an AWDB outage leaves the
+target series current. The current calendar month is excluded from `monthly_elevation` so a
+partial month is never treated as a full-month average. The same table retains the last valid
+daily elevation, its age at month end, robust 3- and 7-day endpoint estimates, their support,
+and provisional-observation counts.
 
 USGS WaterServices, the old source, is decommissioned in early 2027; the pipeline uses the replacement Water Data API. An API key is optional and raises the rate limit; set `USGS_API_KEY` in the environment to use one.
 
@@ -158,7 +162,7 @@ USGS WaterServices, the old source, is decommissioned in early 2027; the pipelin
 Fits the production subset of models (see `src/forecasting/registry.py`) on history from `train_start` and writes forward predictions to the `forecasts` table, tagged with `run_id`, `experiment_id`, and `data_max` so every prediction is traceable to a run and a data vintage.
 
 ```bash
-uv run --frozen gsl-forecast [--horizon 24] [--train-start 1960-01-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09-01.csv --intervals] [--site-data-dir site/data] [--allow-incomplete]
+uv run --frozen gsl-forecast [--horizon 24] [--train-start 1989-10-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09-01.csv --intervals] [--site-data-dir site/data] [--allow-incomplete]
 ```
 
 `--export` writes a dated CSV and required metadata sidecar. The sidecar records the issue
@@ -176,7 +180,7 @@ bounds. The sealed confirmation split is rejected. Per-cutoff results are saved 
 `outputs/`; no committed results snapshot is written by default.
 
 ```bash
-uv run --frozen gsl-cv [--split development] [--n-cutoffs 20] [--train-start 1960-01-01] [--output-dir outputs] [--no-plots] [--results-dir new/empty/path]
+uv run --frozen gsl-cv [--split development] [--n-cutoffs 20] [--train-start 1989-10-01] [--output-dir outputs] [--no-plots] [--results-dir new/empty/path]
 ```
 
 Pass `--n-cutoffs N` for a seeded sample within the named cohort, and `--models a,b` to
@@ -455,7 +459,7 @@ Everything is stored in DuckDB (`./data/gsl.db`). Every source is a live API, so
 | Table | Source | Content |
 |-------|--------|---------|
 | `usgs_water_surface_elevation_daily` | USGS 10010000 (Saltair, south arm) | Daily mean elevation, 1847-present, with approval status |
-| `monthly_elevation` | Derived | Monthly avg/min/max/count, complete months only |
+| `monthly_elevation` | Derived | Monthly mean/min/max and support plus last-valid, 3-day median, and 7-day median endpoint states, complete months only |
 | `forecasts` | Model output | Monthly predictions with run_id, experiment_id, data_max |
 | `snotel_sites`, `snotel_daily` | NRCS AWDB | Active SNOTEL sites in HUC 1601 (Bear), 160201 (Weber), 160202 (Provo-Jordan); daily SWE, water-year precipitation, 8-inch soil moisture, and the 1991-2020 median of SWE and precipitation, 1978-present |
 | `reservoir_sites`, `reservoir_monthly` | NRCS AWDB (Bureau of Reclamation stations) | End-of-month storage, kaf, for the 21 reservoirs in the same units (Bear Lake from 1911, Utah Lake from 1932, Jordanelle from 1993) |
@@ -468,9 +472,9 @@ Everything is stored in DuckDB (`./data/gsl.db`). Every source is a live API, so
 Snowpack at month end is the mean over sites reporting that day. The raw mean drifts as the roster grows (18 sites in 1979, 55 in 2026), which the percent-of-median columns avoid; young sites without a 30-year median count in the mean but not in the percent. Reservoir storage is summed over the stations reporting, so sums before a dam was built are smaller for a physical reason. The south-arm level is also managed at the causeway: the breach berm was raised in 2022, overtopped in 2023, and HB1001 (2025) lets the state raise it to 4,192 ft when the south arm is at or below 4,190 ft; `head_diff_ft` and `breach_kaf` carry that signal.
 
 Before October 1989 the target observations have materially different temporal support; many
-nominal monthly means are based on sparse readings rather than near-daily coverage. The current
-1960 training start therefore does not create a homogeneous target. Repairing that measurement
-boundary and its provenance is the next data-layer change.
+nominal monthly means are based on sparse readings rather than near-daily coverage. New model
+fits therefore default to 1989-10 onward. Earlier rows remain available only for explicit
+sensitivity experiments.
 
 ## Tests and lint
 

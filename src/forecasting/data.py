@@ -17,15 +17,13 @@ def _load(conn: duckdb.DuckDBPyConnection, train_start: str | None) -> pd.DataFr
     if "monthly_covariates" in tables:
         df = conn.execute(
             """
-            SELECT e.month, e.avg_elevation, c.* EXCLUDE (month)
+            SELECT e.*, c.* EXCLUDE (month)
             FROM monthly_elevation e LEFT JOIN monthly_covariates c USING (month)
             ORDER BY e.month
             """
         ).fetchdf()
     else:
-        df = conn.execute(
-            "SELECT month, avg_elevation FROM monthly_elevation ORDER BY month"
-        ).fetchdf()
+        df = conn.execute("SELECT * FROM monthly_elevation ORDER BY month").fetchdf()
     df["month"] = pd.to_datetime(df["month"])
     if train_start:
         df = df[df["month"] >= pd.Timestamp(train_start)].reset_index(drop=True)

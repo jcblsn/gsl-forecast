@@ -61,6 +61,7 @@ def test_default_policy_is_the_frozen_development_cohort():
     assert split["cutoff_end"] == "2024-08-01"
     assert split["status"] == "open_development"
     assert horizon == 24
+    assert config["forecasting"]["train_start"] == "1989-10-01"
 
 
 def test_sealed_confirmation_split_is_rejected():
@@ -113,9 +114,7 @@ class TestEvaluateAtCutoff:
         incomplete = monthly_data[monthly_data["month"] != missing]
 
         with pytest.raises(ValueError, match=f"Missing actual target month.*{missing.date()}"):
-            evaluate_at_cutoff(
-                incomplete, cutoff, [NaiveForecaster(method="last")], horizon=6
-            )
+            evaluate_at_cutoff(incomplete, cutoff, [NaiveForecaster(method="last")], horizon=6)
 
     def test_forecaster_target_months_must_match_leads(self, monthly_data):
         class ShiftedForecaster(NaiveForecaster):

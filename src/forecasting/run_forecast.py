@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 from datetime import date
+from numbers import Integral, Real
 
 import duckdb
 import pandas as pd
@@ -24,6 +25,9 @@ REQUIRED_COVARIATES = ("swe_eom_gsl", "prec_wy_eom_gsl", "head_diff_ft")
 TABLE_LEADS = (3, 6, 12, 24)
 SAMPLE_COLUMNS = (
     "avg_elevation",
+    "last_elevation",
+    "endpoint_3d_median",
+    "endpoint_7d_median",
     "swe_eom_gsl",
     "prec_wy_eom_gsl",
     "head_diff_ft",
@@ -83,21 +87,30 @@ def data_status(db_path: str) -> tuple[dict, list[str]]:
     forecast silently: a stale series, a thin last month, or null covariates."""
     df = load_monthly_data(db_path)
     last = df.iloc[-1]
-    with duckdb.connect(db_path, read_only=True) as conn:
-        n_obs = conn.execute(
-            "SELECT observation_count FROM monthly_elevation WHERE month = ?", [last["month"]]
-        ).fetchone()[0]
+    n_obs = int(last["observation_count"])
     missing = [c for c in REQUIRED_COVARIATES if c not in df or pd.isna(last[c])]
     n_sites = last.get("n_snotel_sites")
     meta = {
         "data_max": str(last["month"].date()),
         "observation_count": int(n_obs),
+        "last_observation_date": _json_value(last.get("last_observation_date")),
+        "last_elevation": _json_value(last.get("last_elevation")),
+        "endpoint_age_days": _json_value(last.get("endpoint_age_days")),
+        "endpoint_3d_observation_count": _json_value(last.get("endpoint_3d_observation_count")),
+        "endpoint_7d_observation_count": _json_value(last.get("endpoint_7d_observation_count")),
+        "provisional_observation_count": _json_value(last.get("provisional_observation_count")),
         "n_snotel_sites": None if pd.isna(n_sites) else int(n_sites),
         "missing_covariates": missing,
     }
     problems = []
     if n_obs < MIN_OBS_DAYS:
         problems.append(f"only {n_obs} daily readings in {meta['data_max']}")
+    endpoint_age = meta["endpoint_age_days"]
+    if endpoint_age is not None and endpoint_age > 2:
+        problems.append(
+            f"last valid elevation is {int(endpoint_age)} days before month end in "
+            f"{meta['data_max']}"
+        )
     if missing:
         problems.append(f"null at cutoff: {missing}")
     return meta, problems
@@ -391,7 +404,9 @@ def _json_value(value):
         return None
     if isinstance(value, (pd.Timestamp, date)):
         return str(pd.Timestamp(value).date())
-    if isinstance(value, (float, int)):
+    if isinstance(value, Integral):
+        return int(value)
+    if isinstance(value, Real):
         return float(value)
     return value
 
@@ -515,6 +530,9 @@ def export_site_data(
     bundle["vintage"] = {
         "data_max": meta.get("data_max"),
         "observation_count": meta.get("observation_count"),
+        "last_observation_date": meta.get("last_observation_date"),
+        "endpoint_age_days": meta.get("endpoint_age_days"),
+        "provisional_observation_count": meta.get("provisional_observation_count"),
         "n_snotel_sites": meta.get("n_snotel_sites"),
         "missing_covariates": meta.get("missing_covariates", []),
     }
@@ -539,7 +557,7 @@ def main() -> None:
     parser.add_argument("--config", help="Path to config file")
     parser.add_argument("--horizon", type=int, help="Forecast horizon in months")
     parser.add_argument("--experiment-db", help="Path to experiment database")
-    parser.add_argument("--train-start", help="Earliest training date, e.g. 1960-01-01")
+    parser.add_argument("--train-start", help="Earliest training date, e.g. 1989-10-01")
     parser.add_argument(
         "--export", help="CSV path for the dated forecast, e.g. forecasts/2026-09-01.csv"
     )

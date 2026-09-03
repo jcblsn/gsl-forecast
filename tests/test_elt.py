@@ -102,6 +102,53 @@ class TestTransform:
         assert abs(rows[0][1] - (4195.5 + 4196.0) / 2) < 1e-6
         assert rows[1][4] == 1
 
+    def test_monthly_table_preserves_endpoint_state_and_quality(self, conn):
+        conn.execute(
+            f"CREATE TABLE {SOUTH_ARM_TABLE} (d DATE, elevation FLOAT, qualifiers VARCHAR)"
+        )
+        conn.execute(f"""
+            INSERT INTO {SOUTH_ARM_TABLE} VALUES
+            ('2022-01-25', 4194.0, 'Approved'),
+            ('2022-01-29', 4195.0, 'Approved'),
+            ('2022-01-30', 4196.0, 'Provisional'),
+            ('2022-01-31', 4200.0, 'Provisional')
+        """)
+
+        transform(conn)
+
+        row = conn.execute("""
+            SELECT last_elevation, last_observation_date, endpoint_age_days,
+                   endpoint_3d_median, endpoint_3d_observation_count,
+                   endpoint_7d_median, endpoint_7d_observation_count,
+                   provisional_observation_count
+            FROM monthly_elevation
+        """).fetchone()
+        assert row == (
+            4200.0,
+            date(2022, 1, 31),
+            0,
+            pytest.approx(4196.0),
+            3,
+            pytest.approx(4195.5),
+            4,
+            2,
+        )
+
+    def test_endpoint_age_exposes_a_missing_month_end(self, conn):
+        conn.execute(
+            f"CREATE TABLE {SOUTH_ARM_TABLE} (d DATE, elevation FLOAT, qualifiers VARCHAR)"
+        )
+        conn.execute(f"INSERT INTO {SOUTH_ARM_TABLE} VALUES ('2022-02-25', 4195.0, 'Approved')")
+
+        transform(conn)
+
+        row = conn.execute("""
+            SELECT last_elevation, endpoint_age_days, endpoint_3d_median,
+                   endpoint_7d_median
+            FROM monthly_elevation
+        """).fetchone()
+        assert row == (4195.0, 3, None, pytest.approx(4195.0))
+
     def test_partial_current_month_is_dropped(self, conn):
         conn.execute(
             f"CREATE TABLE {SOUTH_ARM_TABLE} (d DATE, elevation FLOAT, qualifiers VARCHAR)"

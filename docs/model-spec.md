@@ -22,11 +22,15 @@ code extracts both from the monthly path.
 An issue date is the first day of the month after the data cutoff. An outlook issued
 February 1 uses data through January 31. This matches the NRCS schedule.
 
-The forecast horizon is 24 months. The models train on data from 1960-01-01. Target
-observations before 1990 have materially different temporal support from the modern record;
-before 1960 the daily table holds about 1 reading per month, so many early monthly rows are
-single readings. This limits historical comparability even when those observations are used
-for fitting.
+The forecast horizon is 24 months. New fits default to the homogeneous modern target record
+beginning 1989-10-01. Earlier observations remain available for explicit sensitivity runs,
+but they do not enter the default likelihood as if they had the same observation operator.
+
+The target remains the monthly mean. The monthly table separately carries the last valid daily
+elevation, its distance from calendar month end, and medians over the final 3 and 7 calendar
+days. These endpoint fields are issue-time state estimates, not replacements for the target.
+Approval support and the observation counts behind the monthly mean and endpoint estimates
+remain alongside them.
 
 ## 2 Inputs and their dates
 
@@ -36,6 +40,7 @@ All inputs come from live APIs. The table gives the first and last month with a 
 | Column | Source | First month | Last month | Delay at issue |
 |---|---|---|---|---|
 | `avg_elevation` | USGS 10010000 | 1847-10 | 2026-08 | None; provisional same day |
+| `last_elevation`, `endpoint_3d_median`, `endpoint_7d_median` | USGS 10010000 | 1847-10 | 2026-08 | None; provisional same day |
 | `swe_eom_gsl`, `prec_wy_eom_gsl` | NRCS SNOTEL | 1978-10 | 2026-08 | None; daily values post next day |
 | `swe_pct_median_gsl` | NRCS SNOTEL | 1978-10 | 2026-05 | None, but October to May only |
 | `prec_pct_median_gsl` | NRCS SNOTEL | 1978-10 | 2026-08 | None |
@@ -323,7 +328,7 @@ versioned policy defines three cohorts:
   are grouped by forecast version, and are never reused to tune the version that produced
   them.
 
-At each development cutoff the harness trains every model on data from 1960 through the
+At each development cutoff the harness trains every model on data from 1989-10 through the
 cutoff, then predicts 24 months. It records the policy version and exact bounds along with
 MAE and RMSE per model and lead, MAE relative to `naive_last`, mean pinball loss, nominal
 90% coverage, and the 2 headline scalars by issue month.

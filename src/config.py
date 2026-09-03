@@ -1,9 +1,11 @@
 import json
 import os
 
+MODERN_TARGET_START = "1989-10-01"
+
 DEFAULTS = {
     "forecasting": {
-        "train_start": None,
+        "train_start": MODERN_TARGET_START,
         "horizon": 12,
         "experiment_db": "forecast_experiments.db",
         "output_dir": "./outputs",
