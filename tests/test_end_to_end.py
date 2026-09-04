@@ -173,3 +173,45 @@ def test_data_status_flags_thin_month_and_null_covariates(project):
         )
     _, problems = data_status(project["db_path"])
     assert problems[0].startswith("only 3 daily readings")
+
+
+def add_column(conn, table: str, column: str, kind: str) -> None:
+    """Add a column the small end-to-end fixture leaves out, so one gate can be tested."""
+    present = {row[0] for row in conn.execute(f"DESCRIBE {table}").fetchall()}
+    if column not in present:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+
+
+def test_data_status_flags_an_inflow_month_the_gauges_did_not_cover(project):
+    """A monthly volume built from 25 reporting days is scaled, not measured. The pipeline
+    computed the coverage and no reader used it, so a scaled month reached the forecast
+    without a word."""
+    from src.forecasting.run_forecast import data_status
+
+    with duckdb.connect(project["db_path"]) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS monthly_covariates (month DATE, inflow_day_coverage DOUBLE)"
+        )
+        add_column(conn, "monthly_covariates", "inflow_day_coverage", "DOUBLE")
+        conn.execute("DELETE FROM monthly_covariates")
+        conn.execute("INSERT INTO monthly_covariates VALUES (DATE '2019-12-01', 0.81)")
+    meta, problems = data_status(project["db_path"])
+    assert meta["inflow_day_coverage"] == pytest.approx(0.81)
+    assert any("inflow gauges cover 81%" in p for p in problems)
+
+
+def test_data_status_does_not_flag_a_provisional_cutoff_month(project):
+    """USGS approves a month long after it ends, so the cutoff month is provisional at every
+    issue. A gate on that would fire every month, and a warning that always fires is one
+    nobody reads. The share is recorded instead."""
+    from src.forecasting.run_forecast import data_status
+
+    with duckdb.connect(project["db_path"]) as conn:
+        add_column(conn, "monthly_elevation", "provisional_observation_count", "BIGINT")
+        conn.execute(
+            "UPDATE monthly_elevation SET provisional_observation_count = observation_count "
+            "WHERE month = '2019-12-01'"
+        )
+    meta, problems = data_status(project["db_path"])
+    assert meta["provisional_observation_count"] == meta["observation_count"]
+    assert not any("provisional" in p for p in problems)

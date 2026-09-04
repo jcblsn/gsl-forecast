@@ -2,7 +2,9 @@
   "sources": {
     "south_arm_site": "10010000",
     "south_arm_start": "1847-10-18",
-    "elevation_parameter": "62614"
+    "elevation_parameter": "62614",
+    "endpoint_rule": "median_3d",
+    "endpoint_rule_note": "Measured over 1989-2026. Closure residual: 0.136 ft/month for last, 0.129 for median_3d, 0.121 for median_7d. Forecast MAE at lead 1: 0.094, 0.093, 0.103. Forecast accuracy cannot separate last from median_3d, so the rule that closes better and resists a single wind-driven reading is used."
   },
   "database": {
     "path": "./data/gsl.db"
@@ -117,7 +119,32 @@
         "WY",
         "ID"
       ],
-      "start": "1900-01-01"
+      "start": "1900-01-01",
+      "roster": {
+        "version": "gsl-modern-complete-v1",
+        "rule": "BOR reservoirs with a storage value in every month from 1989-10 to 2026-08.",
+        "stations": {
+          "bear": [
+            "10055500:ID:BOR",
+            "10020200:WY:BOR",
+            "10107000:UT:BOR"
+          ],
+          "weber": [
+            "10129400:UT:BOR",
+            "10131500:UT:BOR",
+            "10132490:UT:BOR",
+            "10134000:UT:BOR",
+            "10137290:UT:BOR",
+            "10139000:UT:BOR",
+            "10140800:UT:BOR"
+          ],
+          "provo_jordan": [
+            "09UT06JJ:UT:BOR",
+            "10155050:UT:BOR",
+            "10166500:UT:BOR"
+          ]
+        }
+      }
     },
     "nrcs_forecasts": {
       "station": "10010000:UT:USGS",
@@ -139,11 +166,28 @@
       "exchange": {
         "breach": "10010020"
       },
-      "start": "1900-01-01"
+      "start": "1900-01-01",
+      "delivery_ratio": 0.8246,
+      "delivery_ratio_note": "Gauged terminal sum divided by this gives estimated total delivery to the lake. 1979 kaf of gauged flow against 2400 kaf of assumed delivery under Utah basin-plan design conditions. Source: gslaccounting.org, an analysis site, not peer reviewed. WaterBalanceForecaster also fits the ratio and reports both."
     },
     "north_arm": {
       "site": "10010100",
       "start": "1960-01-01"
+    },
+    "kslc": {
+      "station": "USW00024127",
+      "name": "Salt Lake City International Airport, GHCN-D",
+      "start": "1948-01-01"
+    },
+    "brine": {
+      "source": "https://geology.utah.gov/docs/xls/GSL_brine_chem_db.xlsx",
+      "primary_site": "AS2",
+      "cross_check_sites": [
+        "AC3"
+      ],
+      "start": "1966-01-01",
+      "cache_path": "data/cache/GSL_brine_chem_db.xlsx",
+      "note": "AS2 is the open-water Gilbert Bay site Utah's lake summary plots. It is the only south-transect site with a computed salinity for the full record. Sampling is about 2 campaigns a year, so this resolves salt mass, not a seasonal salinity cycle."
     }
   }
 }

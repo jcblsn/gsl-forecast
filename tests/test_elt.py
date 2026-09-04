@@ -6,6 +6,7 @@ import duckdb
 import pytest
 
 from src.pipeline.elt import SOUTH_ARM_TABLE, run_pipeline, transform
+from src.pipeline.quality import approval_sql, is_provisional_sql, normalize_flags
 from src.pipeline.usgs import fetch_usgs_daily, ingest_elevation
 
 
@@ -53,8 +54,8 @@ class TestFetchUsgsDaily:
         ]
         rows = fetch_usgs_daily("10010000", "62614", "2022-01-01")
         assert rows == [
-            ("2022-01-01", 4195.5, "Approved,ESTIMATED"),
-            ("2022-01-03", 4196.0, "Approved"),
+            ("2022-01-01", 4195.5, "approved,estimated"),
+            ("2022-01-03", 4196.0, "approved"),
         ]
         first, second = (c.kwargs["params"] for c in mock_get.call_args_list)
         assert first["monitoring_location_id"] == "USGS-10010000"
@@ -202,3 +203,59 @@ class TestRunPipeline:
     def test_pipeline_raises_on_elevation_failure(self, mock_ingest, config_path):
         with pytest.raises(Exception, match="fetch failed"):
             run_pipeline(config_path)
+
+
+def test_both_usgs_approval_vocabularies_normalize_to_one_word():
+    """USGS wrote `P` before 2025 and `Provisional` after. A reader that knows only one word
+    counts the other as approved, and the count of provisional days is wrong with no error."""
+    assert normalize_flags("P", None) == "provisional"
+    assert normalize_flags("Provisional", None) == "provisional"
+    assert normalize_flags("A", None) == "approved"
+    assert normalize_flags("Approved", None) == "approved"
+    assert normalize_flags(None, None) == "unknown"
+    assert normalize_flags("A", ["ESTIMATED", "ICE"]) == "approved,estimated,ice"
+
+
+def test_provisional_sql_reads_both_vocabularies(conn):
+    """The stored record holds both vocabularies, because rows outside the refetch window are
+    never read again. The SQL must count a legacy `P` day as provisional."""
+    conn.execute("CREATE TABLE flags (q VARCHAR)")
+    conn.execute("INSERT INTO flags VALUES ('P'), ('provisional'), ('A'), ('approved'), (NULL)")
+    counted = conn.execute(
+        f"SELECT COUNT(*) FROM flags WHERE {is_provisional_sql('q')}"
+    ).fetchone()[0]
+    assert counted == 2
+    statuses = conn.execute(f"SELECT {approval_sql('q')} FROM flags ORDER BY 1").fetchall()
+    assert [s[0] for s in statuses] == [
+        "approved",
+        "approved",
+        "provisional",
+        "provisional",
+        "unknown",
+    ]
+
+
+def test_monthly_elevation_carries_an_end_of_month_state(conn):
+    """A water balance closes between two instants. The monthly mean is not one, so the
+    transform must publish an end-of-month value beside it."""
+    conn.execute(f"CREATE TABLE {SOUTH_ARM_TABLE} (d DATE, elevation FLOAT, qualifiers VARCHAR)")
+    conn.execute(f"""
+        INSERT INTO {SOUTH_ARM_TABLE} VALUES
+            ('2020-01-01', 4190.0, 'approved'),
+            ('2020-01-30', 4192.0, 'approved'),
+            ('2020-01-31', 4194.0, 'approved')
+    """)
+    transform(conn, "median_3d")
+    row = conn.execute(
+        "SELECT avg_elevation, elevation_eom_ft, last_elevation FROM monthly_elevation"
+    ).fetchone()
+    assert row[0] == pytest.approx(4192.0)
+    assert row[1] == pytest.approx(4193.0)
+    assert row[2] == pytest.approx(4194.0)
+
+
+def test_an_unknown_endpoint_rule_is_refused(conn):
+    """A typo in the config must not silently fall back to a different end-of-month state."""
+    conn.execute(f"CREATE TABLE {SOUTH_ARM_TABLE} (d DATE, elevation FLOAT, qualifiers VARCHAR)")
+    with pytest.raises(ValueError, match="Unknown endpoint rule"):
+        transform(conn, "last_day_of_the_week")

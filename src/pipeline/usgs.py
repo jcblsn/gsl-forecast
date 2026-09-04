@@ -15,6 +15,8 @@ import duckdb
 import pandas as pd
 import requests
 
+from src.pipeline.quality import normalize_flags
+
 USGS_DAILY = "https://api.waterdata.usgs.gov/ogcapi/v0/collections/daily/items"
 PAGE = 50000
 REFETCH_DAYS = 45
@@ -37,8 +39,11 @@ def get_with_retry(url: str, params: dict | None = None, timeout: int = 300, tri
 def fetch_usgs_daily(
     site: str, parameter: str, start: str, end: str | None = None, url: str = USGS_DAILY
 ) -> list[tuple[str, float, str]]:
-    """(date, value, flags) for one site and parameter code, daily mean statistic. Flags
-    are the approval status (Approved or Provisional) followed by any qualifiers."""
+    """(date, value, flags) for one site and parameter code, daily mean statistic.
+
+    Flags are the normalized approval status followed by any qualifier codes. USGS has used
+    two vocabularies, so `normalize_flags` maps both to one form.
+    """
     params = {
         "monitoring_location_id": f"USGS-{site}",
         "parameter_code": parameter,
@@ -60,9 +65,8 @@ def fetch_usgs_daily(
                 value = float(p["value"])
             except (TypeError, ValueError):
                 continue
-            q = p.get("qualifier") or []
-            flags = [p.get("approval_status") or "", *(q if isinstance(q, list) else [q])]
-            rows.append((p["time"], value, ",".join(f for f in flags if f)))
+            flags = normalize_flags(p.get("approval_status"), p.get("qualifier"))
+            rows.append((p["time"], value, flags))
         links = body.get("links", [])
         nxt = next((link["href"] for link in links if link.get("rel") == "next"), None)
         if not nxt or not body.get("features"):

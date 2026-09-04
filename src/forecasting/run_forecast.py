@@ -34,6 +34,15 @@ SAMPLE_COLUMNS = (
 )
 SAMPLE_MONTHS = 12
 MIN_OBS_DAYS = 28
+# A month whose inflow gauges did not all report a full calendar month is a scaled estimate
+# and not a measured volume. The pipeline computed this and no reader used it, so a scaled
+# month was invisible at issue time.
+#
+# There is deliberately no gate on the provisional share. USGS approves a month long after it
+# ends, so the cutoff month is provisional at every issue. A gate on it would fire every
+# month, and a warning that always fires is one nobody reads. The share is recorded in the
+# issue metadata instead, where it describes the vintage without blocking it.
+MIN_INFLOW_COVERAGE = 1.0
 ISSUE_METADATA_SCHEMA_VERSION = 1
 ISSUE_STATUSES = {"experimental", "release"}
 SITE_PROVENANCE_FIELDS = (
@@ -126,12 +135,25 @@ def data_status(db_path: str) -> tuple[dict, list[str]]:
         "provisional_observation_count": _json_value(last.get("provisional_observation_count")),
         "n_snotel_sites": None if pd.isna(n_sites) else int(n_sites),
         "snotel_roster_version": last.get("snotel_roster_version"),
+        "reservoir_roster_version": last.get("reservoir_roster_version"),
+        "n_reservoirs": _json_value(last.get("n_reservoirs")),
+        "inflow_day_coverage": _json_value(last.get("inflow_day_coverage")),
+        "inflow_provisional_days": _json_value(last.get("inflow_provisional_days")),
+        "inflow_estimated_days": _json_value(last.get("inflow_estimated_days")),
+        "inflow_ice_days": _json_value(last.get("inflow_ice_days")),
+        "n_inflow_gauges": _json_value(last.get("n_inflow_gauges")),
         "missing_covariates": missing,
         "modeling_table": table_fingerprint(df),
     }
     problems = []
     if n_obs < MIN_OBS_DAYS:
         problems.append(f"only {n_obs} daily readings in {meta['data_max']}")
+    coverage = meta["inflow_day_coverage"]
+    if coverage is not None and coverage < MIN_INFLOW_COVERAGE:
+        problems.append(
+            f"inflow gauges cover {coverage:.0%} of the days in {meta['data_max']}, "
+            "so the monthly volume is scaled and not measured"
+        )
     endpoint_age = meta["endpoint_age_days"]
     if endpoint_age is not None and endpoint_age > 2:
         problems.append(

@@ -20,6 +20,7 @@ from dateutil.relativedelta import relativedelta
 
 from src.forecasting.cross_validate import evaluate_at_cutoff
 from src.forecasting.multivariate.blend import BlendForecaster
+from src.forecasting.multivariate.water_balance import WaterBalanceForecaster
 from src.forecasting.registry import production_forecasters
 from src.pipeline.covariates import UNAVAILABLE_AT_ISSUE
 
@@ -29,7 +30,11 @@ HORIZON = 6
 
 @pytest.fixture(scope="module")
 def series():
-    """25 years of monthly data with each column that a production model reads."""
+    """25 years of monthly data with each column that a production model reads.
+
+    The level stays inside the hypsometry table, because the storage models convert it to a
+    volume and refuse an elevation the bathymetry does not cover.
+    """
     rng = np.random.default_rng(11)
     rows = []
     level = 4195.0
@@ -40,7 +45,9 @@ def series():
             swe_year = rng.uniform(4, 20)
         swe = swe_year * {11: 0.2, 12: 0.4, 1: 0.6, 2: 0.8, 3: 1.0, 4: 0.6}.get(m.month, 0.0)
         inflow = swe_year * {4: 8, 5: 15, 6: 10}.get(m.month, 1.0)
-        level += 0.02 * inflow - 0.25 - 0.001 * (level - 4195)
+        # The level is held in the range the hypsometry table covers. A synthetic lake that
+        # drifts past 4211 ft is not a lake, and the storage models refuse it.
+        level += 0.004 * inflow - 0.25 - 0.05 * (level - 4195)
         rows.append(
             {
                 "month": pd.Timestamp(m),
@@ -49,6 +56,11 @@ def series():
                 "prec_wy_eom_gsl": swe * 1.5,
                 "head_diff_ft": 0.5 + 0.02 * (level - 4195.0),
                 "inflow_kaf_total": inflow,
+                "elevation_eom_ft": level + 0.01,
+                "tmax_f_kslc": 62 + 28 * np.sin(2 * np.pi * (m.month - 4) / 12),
+                "tmin_f_kslc": 40 + 22 * np.sin(2 * np.pi * (m.month - 4) / 12),
+                "prcp_in_kslc": max(0.0, 1.3 - 0.7 * np.sin(2 * np.pi * (m.month - 4) / 12)),
+                "salt_mass_mt": 1200.0 - i * 0.8,
             }
         )
     return pd.DataFrame(rows)
@@ -114,3 +126,37 @@ def test_the_tamper_actually_changes_the_later_rows(series):
 def test_no_model_reads_a_column_that_is_absent_at_issue_time(factory):
     forbidden = set(UNAVAILABLE_AT_ISSUE) & set(factory.feature_columns())
     assert not forbidden, f"{factory.name} reads {sorted(forbidden)}, which is 1 month late"
+
+
+@pytest.mark.parametrize("factory", production_forecasters(), ids=lambda f: f.name)
+def test_no_model_reads_an_unlagged_salinity(factory):
+    """Salinity is dissolved salt over volume, and elevation is a function of volume. A model
+    that reads this month's salinity to predict this month's elevation predicts elevation
+    partly from itself; the measured correlation of the 2 is -0.68."""
+    named = set(factory.feature_columns())
+    assert "salinity_gl" not in named, f"{factory.name} reads a contemporaneous salinity"
+
+
+def test_the_weather_columns_a_balance_reads_are_available_at_issue():
+    """KSLC publishes a day about 1 day later, so the cutoff month is complete when the
+    workflow runs on the 2nd. That is why these are not in `UNAVAILABLE_AT_ISSUE`, unlike the
+    nClimDiv columns, which arrive around the 8th."""
+    model = WaterBalanceForecaster()
+    weather = {"tmax_f_kslc", "tmin_f_kslc", "prcp_in_kslc"}
+    assert weather <= set(model.feature_columns())
+    assert not weather & set(UNAVAILABLE_AT_ISSUE)
+
+
+def test_the_balance_forces_future_months_from_climatology_not_from_the_frame(series):
+    """A future month has no weather. The model must force it from a calendar-month
+    climatology of the training window, so tampering with later rows changes nothing."""
+    model = WaterBalanceForecaster(salinity=False)
+    truncated = series[series["month"] <= CUTOFF]
+    honest = model.fit(truncated).predict(HORIZON)["pred"].to_numpy()
+    tampered_frame = truncated.copy()
+    again = WaterBalanceForecaster(salinity=False).fit(tampered_frame).predict(HORIZON)
+    assert np.allclose(honest, again["pred"].to_numpy())
+    # The climatology covers all 12 months even though the training window need not end in
+    # December, so a 24-month rollout never meets a month it has no forcing for.
+    assert sorted(model._climatology.index) == list(range(1, 13))
+    assert model._climatology.notna().all().all()

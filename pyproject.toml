@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "duckdb>=1.2.0",
     "experiment-tracker",
+    "openpyxl>=3.1.5",
     "pandas>=2.2.3",
     "plotnine>=0.14.0",
     "pyarrow>=17.0.0",
@@ -25,6 +26,7 @@ gsl-forecast = "src.forecasting.run_forecast:main"
 gsl-plot = "src.forecasting.plot_forecasts:main"
 gsl-cv = "src.forecasting.cross_validate:main"
 gsl-results = "src.forecasting.view_results:main"
+gsl-audit = "src.forecasting.audit:main"
 gsl-benchmark = "src.forecasting.benchmark:main"
 gsl-verify = "src.forecasting.verify:main"
 gsl-hindcast = "src.forecasting.hindcast:main"

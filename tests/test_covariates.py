@@ -1,7 +1,11 @@
+from datetime import date, datetime
+from io import BytesIO
+
 import duckdb
+import openpyxl
 import pytest
 
-from src.pipeline import climate, usgs
+from src.pipeline import brine, climate, usgs, weather
 from src.pipeline import covariates as cov
 
 CFG = {
@@ -19,6 +23,8 @@ CFG = {
         "start": "2020-01-01",
     },
     "north_arm": {"site": "10010100", "start": "2020-01-01"},
+    "kslc": {"station": "USW00024127", "start": "2020-01-01"},
+    "brine": {"primary_site": "AS2", "start": "2020-01-01"},
 }
 
 
@@ -38,12 +44,42 @@ class FakeResponse:
     def text(self):
         return self.payload
 
+    @property
+    def content(self):
+        return self.payload
+
 
 CLIMDIV_LISTING = "climdiv-tmpcdv-v1.0.0-20200206 climdiv-pcpndv-v1.0.0-20200206"
 CLIMDIV_LINE = "{}{}2020  30.00  32.00" + " -99.90" * 10
 
 
+def brine_workbook() -> bytes:
+    """A 2-campaign AS2 sheet, so the brine reader can be exercised without the 4 MB file."""
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "AS2"
+    sheet.append(
+        ["SITE", "DATE", "DEPTH-FT", "Salinity EOS (g/L)", "LAB-DEN\n(g/cm3)", "LK-ELEV (feet)"]
+    )
+    sheet.append(["AS2", datetime(2020, 1, 15), 3, 120.0, 1.09, 4193.0])
+    sheet.append(["AS2", datetime(2020, 1, 15), 25, 180.0, 1.14, 4193.0])
+    sheet.append(["AS2", datetime(2020, 7, 15), 3, 140.0, 1.10, 4192.0])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+KSLC_CSV = (
+    '"STATION","DATE","AWND","PRCP","TMAX","TMIN"\n'
+    '"USW00024127","2020-01-01","   30","    0","  100","   20"\n'
+)
+
+
 def fake_get(url, params=None, timeout=None):
+    if url == brine.UGS_WORKBOOK:
+        return FakeResponse(brine_workbook())
+    if url.startswith(weather.NCEI_DAILY):
+        return FakeResponse(KSLC_CSV)
     if url == climate.CLIMDIV:
         return FakeResponse(CLIMDIV_LISTING)
     if url.startswith(climate.CLIMDIV):
@@ -154,12 +190,28 @@ def fake_get(url, params=None, timeout=None):
     raise AssertionError(url)
 
 
+def seed_elevation(conn) -> None:
+    """The elevation tables the covariate rollup joins to; the pipeline builds these first."""
+    conn.execute(
+        "CREATE TABLE monthly_elevation (month DATE, avg_elevation DOUBLE, elevation_eom_ft DOUBLE)"
+    )
+    conn.execute("INSERT INTO monthly_elevation VALUES ('2020-01-01', 4192.0, 4192.1)")
+    conn.execute(
+        "CREATE TABLE usgs_water_surface_elevation_daily "
+        "(d DATE, elevation FLOAT, qualifiers VARCHAR)"
+    )
+    conn.execute(
+        "INSERT INTO usgs_water_surface_elevation_daily VALUES "
+        "('2020-01-15', 4192.0, 'approved'), ('2020-07-15', 4191.0, 'approved')"
+    )
+
+
 @pytest.fixture
 def db(monkeypatch):
     monkeypatch.setattr(usgs.requests, "get", fake_get)
+    monkeypatch.setattr(brine.requests, "get", fake_get)
     with duckdb.connect(":memory:") as conn:
-        conn.execute("CREATE TABLE monthly_elevation (month DATE, avg_elevation DOUBLE)")
-        conn.execute("INSERT INTO monthly_elevation VALUES ('2020-01-01', 4192.0)")
+        seed_elevation(conn)
         cov.run_covariates(conn, {"covariates": CFG})
         yield conn
 
@@ -179,6 +231,7 @@ def test_snotel_rows_merge_elements(db):
 
 def test_snotel_old_schema_is_rebuilt(monkeypatch):
     monkeypatch.setattr(usgs.requests, "get", fake_get)
+    monkeypatch.setattr(brine.requests, "get", fake_get)
     with duckdb.connect(":memory:") as conn:
         conn.execute("CREATE TABLE snotel_daily (station_triplet VARCHAR, d DATE, wteq_in FLOAT)")
         cov.ingest_snotel(conn, CFG["snotel"])
@@ -308,6 +361,7 @@ def test_roster_defaults_to_the_sites_discovered_today(db):
 
 def test_configured_roster_names_its_version_and_weights(monkeypatch):
     monkeypatch.setattr(usgs.requests, "get", fake_get)
+    monkeypatch.setattr(brine.requests, "get", fake_get)
     with duckdb.connect(":memory:") as conn:
         cov.ingest_snotel(conn, roster_cfg()["snotel"])
         rows = conn.execute("SELECT * FROM snotel_roster ORDER BY station_triplet").fetchall()
@@ -320,10 +374,10 @@ def test_configured_roster_names_its_version_and_weights(monkeypatch):
 def test_features_ignore_a_site_the_roster_left_out(monkeypatch):
     """A site an earlier run left in snotel_sites must not reach monthly_covariates."""
     monkeypatch.setattr(usgs.requests, "get", fake_get)
+    monkeypatch.setattr(brine.requests, "get", fake_get)
     cfg = roster_cfg(stations={"bear": ["1:UT:SNTL"]}, basin_weights={"bear": 1.0})
     with duckdb.connect(":memory:") as conn:
-        conn.execute("CREATE TABLE monthly_elevation (month DATE, avg_elevation DOUBLE)")
-        conn.execute("INSERT INTO monthly_elevation VALUES ('2020-01-01', 4192.0)")
+        seed_elevation(conn)
         cov.run_covariates(conn, {"covariates": cfg})
         row = conn.execute(
             "SELECT n_snotel_sites, swe_eom_provo_jordan, snotel_roster_version "
@@ -334,6 +388,7 @@ def test_features_ignore_a_site_the_roster_left_out(monkeypatch):
 
 def test_roster_rejects_a_station_awdb_does_not_return(monkeypatch):
     monkeypatch.setattr(usgs.requests, "get", fake_get)
+    monkeypatch.setattr(brine.requests, "get", fake_get)
     cfg = roster_cfg(stations={**ROSTER["stations"], "bear": ["1:UT:SNTL", "99:UT:SNTL"]})
     with duckdb.connect(":memory:") as conn:
         with pytest.raises(ValueError, match="99:UT:SNTL"):
@@ -342,6 +397,7 @@ def test_roster_rejects_a_station_awdb_does_not_return(monkeypatch):
 
 def test_roster_rejects_weights_that_do_not_sum_to_one(monkeypatch):
     monkeypatch.setattr(usgs.requests, "get", fake_get)
+    monkeypatch.setattr(brine.requests, "get", fake_get)
     cfg = roster_cfg(basin_weights={"bear": 0.7, "provo_jordan": 0.7})
     with duckdb.connect(":memory:") as conn:
         with pytest.raises(ValueError, match="sum to 1"):
@@ -371,11 +427,26 @@ def stub_db(daily_rows, roster_rows):
         "CREATE TABLE reservoir_monthly (station_triplet VARCHAR, month DATE, storage_kaf FLOAT)"
     )
     conn.execute("CREATE TABLE reservoir_sites (station_triplet VARCHAR, basin VARCHAR)")
+    conn.execute(
+        "CREATE TABLE reservoir_roster (roster_version VARCHAR, station_triplet VARCHAR, "
+        "basin VARCHAR)"
+    )
     conn.execute(f"CREATE TABLE {cov.NORTH_ARM_TABLE} (d DATE, elevation DOUBLE)")
     conn.execute(
         "CREATE TABLE climdiv_monthly (month DATE, division VARCHAR, tavg_f DOUBLE, prcp_in DOUBLE)"
     )
-    conn.execute("CREATE TABLE monthly_elevation (month DATE, avg_elevation DOUBLE)")
+    conn.execute(
+        "CREATE TABLE monthly_elevation (month DATE, avg_elevation DOUBLE, elevation_eom_ft DOUBLE)"
+    )
+    conn.execute(
+        f"CREATE TABLE {weather.KSLC_TABLE} (d DATE, tmax_c DOUBLE, tmin_c DOUBLE, "
+        "wind_mps DOUBLE, prcp_in DOUBLE)"
+    )
+    conn.execute(
+        "CREATE TABLE gsl_salt_mass_monthly (month DATE, salt_mass_mt DOUBLE, "
+        "salt_mass_age_days DOUBLE)"
+    )
+    brine.materialize_hypsometry(conn)
     return conn
 
 
@@ -458,3 +529,102 @@ def test_provisional_and_estimated_days_reach_the_modelled_table():
             "FROM monthly_covariates"
         ).fetchone()
     assert row[:2] == (1, 2) and row[2] == pytest.approx(28 / 31)
+
+
+def test_reservoir_roster_rejects_a_station_awdb_does_not_return():
+    """Storage summed over whichever reservoirs answered today is a different quantity every
+    run. The station count in the record moves from 1 to 21 to 19 for that reason."""
+    conn = duckdb.connect(":memory:")
+    cfg = {"roster": {"version": "v1", "stations": {"bear": ["A:UT:BOR", "GONE:UT:BOR"]}}}
+    with pytest.raises(ValueError, match="did not return these roster reservoirs"):
+        cov.create_reservoir_roster(conn, [{"station_triplet": "A:UT:BOR", "basin": "bear"}], cfg)
+
+
+def test_reservoir_roster_rejects_a_station_in_another_basin():
+    """A reservoir counted in the wrong basin moves storage between basins silently."""
+    conn = duckdb.connect(":memory:")
+    cfg = {"roster": {"version": "v1", "stations": {"bear": ["A:UT:BOR"]}}}
+    sites = [{"station_triplet": "A:UT:BOR", "basin": "weber"}]
+    with pytest.raises(ValueError, match="sit in another basin"):
+        cov.create_reservoir_roster(conn, sites, cfg)
+
+
+def test_reservoir_roster_pins_the_station_set_and_its_version():
+    """The roster version must travel with the feature, so a later reader can tell which
+    basket of reservoirs a stored value summed."""
+    conn = duckdb.connect(":memory:")
+    cfg = {"roster": {"version": "gsl-modern-complete-v1", "stations": {"bear": ["A:UT:BOR"]}}}
+    sites = [
+        {"station_triplet": "A:UT:BOR", "basin": "bear"},
+        {"station_triplet": "NEW:UT:BOR", "basin": "bear"},
+    ]
+    triplets = cov.create_reservoir_roster(conn, sites, cfg)
+    assert triplets == ["A:UT:BOR"]
+    rows = conn.execute("SELECT roster_version, station_triplet FROM reservoir_roster").fetchall()
+    assert rows == [("gsl-modern-complete-v1", "A:UT:BOR")]
+
+
+def test_the_gauged_total_and_the_lake_delivery_estimate_are_separate_columns():
+    """The 3 gauges are terminal gauges and do not measure the whole delivery to the lake.
+    Rescaling the column the models already read would change what their coefficients mean."""
+    conn = stub_db([], [])
+    conn.executemany(
+        "INSERT INTO usgs_discharge_daily VALUES (?, ?, ?, ?)",
+        [
+            (site, date(2020, 1, day), 100.0, "approved")
+            for site in ("11", "22", "33")
+            for day in range(1, 32)
+        ],
+    )
+    cov.transform_covariates(
+        conn,
+        {"inflow": {"bear": "11", "weber": "22", "jordan": "33"}},
+        ["bear"],
+        delivery_ratio=0.8,
+    )
+    row = conn.execute(
+        "SELECT inflow_kaf_total, inflow_kaf_lake, n_inflow_gauges FROM monthly_covariates"
+    ).fetchone()
+    assert row[0] == pytest.approx(row[1] * 0.8)
+    assert row[2] == 3
+
+
+def test_a_missing_gauge_nulls_the_total_but_not_the_reported_sum():
+    """One gauge outage used to null the total for 72 months. The partial sum stays available
+    under its own name, with the gauge count beside it, so a reader can see what it holds."""
+    conn = stub_db([], [])
+    conn.executemany(
+        "INSERT INTO usgs_discharge_daily VALUES (?, ?, ?, ?)",
+        [
+            (site, date(2020, 1, day), 100.0, "approved")
+            for site in ("11", "22")
+            for day in range(1, 32)
+        ],
+    )
+    cov.transform_covariates(
+        conn, {"inflow": {"bear": "11", "weber": "22", "jordan": "33"}}, ["bear"]
+    )
+    row = conn.execute(
+        "SELECT inflow_kaf_total, inflow_kaf_reported, n_inflow_gauges FROM monthly_covariates"
+    ).fetchone()
+    assert row[0] is None
+    assert row[1] > 0
+    assert row[2] == 2
+
+
+def test_ice_affected_discharge_days_are_counted():
+    """Ice at the Bear River gauge makes a winter value an estimate. That reaches the water
+    balance directly, so the count must travel with the feature."""
+    conn = stub_db([], [])
+    conn.executemany(
+        "INSERT INTO usgs_discharge_daily VALUES (?, ?, ?, ?)",
+        [
+            ("11", date(2020, 1, day), 100.0, "approved,estimated,ice" if day < 5 else "approved")
+            for day in range(1, 32)
+        ],
+    )
+    cov.transform_covariates(conn, {"inflow": {"bear": "11"}}, ["bear"])
+    row = conn.execute(
+        "SELECT inflow_ice_days, inflow_estimated_days FROM monthly_covariates"
+    ).fetchone()
+    assert row == (4, 4)

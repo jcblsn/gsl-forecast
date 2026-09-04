@@ -3,6 +3,7 @@ from src.forecasting.multivariate.blend import BlendForecaster
 from src.forecasting.multivariate.inflow_chain import InflowChainForecaster
 from src.forecasting.multivariate.state_space import StateSpaceForecaster
 from src.forecasting.multivariate.swe_regression import SweRegressionForecaster
+from src.forecasting.multivariate.water_balance import WaterBalanceForecaster
 from src.forecasting.univariate.drift import DriftForecaster
 from src.forecasting.univariate.endpoint_seasonal import EndpointSeasonalForecaster
 from src.forecasting.univariate.exponential_smoothing import HoltWintersForecaster
@@ -76,6 +77,8 @@ def all_forecasters() -> list[Forecaster]:
         ),
         InflowChainForecaster(),
         InflowChainForecaster(level_term="area", name="inflow_chain_area"),
+        WaterBalanceForecaster(),
+        WaterBalanceForecaster(salinity=False, name="water_balance_nosalt"),
         StateSpaceForecaster(),
         BlendForecaster(),
         BlendForecaster(

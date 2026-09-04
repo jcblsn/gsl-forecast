@@ -14,7 +14,14 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from src.pipeline.brine import (
+    KAF_GL_TO_MT,
+    build_salt_mass,
+    ingest_brine,
+    materialize_hypsometry,
+)
 from src.pipeline.climate import ingest_climdiv
+from src.pipeline.quality import has_qualifier_sql, is_provisional_sql
 from src.pipeline.usgs import (
     REFETCH_DAYS,
     fetch_usgs_daily,
@@ -22,12 +29,20 @@ from src.pipeline.usgs import (
     ingest_elevation,
     upsert,
 )
+from src.pipeline.weather import KSLC_TABLE, ingest_kslc
 
 AWDB = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1"
 DISCHARGE_PARAMETER = "00060"
 # A month of discharge needs this many daily values. The sum is then scaled to the whole
 # month, which assumes the missing days flowed like the days that reported.
 MIN_FLOW_DAYS = 25
+# The 3 terminal gauges sum to 1979 kaf under Utah basin-plan design conditions, against an
+# assumed 2400 kaf of total delivery to the lake. The ratio is 1979 / 2400. The difference is
+# minor tributaries, groundwater, and wetland and canal losses below the gauges. Source:
+# gslaccounting.org, which derives it from the state basin plans. That is an analysis site
+# and not a peer-reviewed source, so `WaterBalanceForecaster` also fits the ratio and reports
+# both values.
+DEFAULT_DELIVERY_RATIO = 0.8246
 ELEVATION_PARAMETER = "62614"
 NORTH_ARM_TABLE = "usgs_north_arm_elevation_daily"
 SNOTEL_ELEMENTS = ("WTEQ", "PREC", "SMS:-8")
@@ -257,6 +272,51 @@ def fetch_reservoir_monthly(triplets: list[str], start: str) -> list[tuple[str, 
     return rows
 
 
+def create_reservoir_roster(
+    conn: duckdb.DuckDBPyConnection, sites: list[dict], cfg: dict
+) -> list[str]:
+    """Write `reservoir_roster`: the versioned set of reservoirs the storage features use.
+
+    Without a roster the storage columns sum whichever stations AWDB reports as active on the
+    day of the run, and whichever stations an earlier run left in `reservoir_sites`. The
+    station count in the local record moves from 1 to 21 to 19, so the sum is a different
+    physical quantity in every era and even between 2 runs. A roster fixes the set.
+
+    Returns the station triplets to fetch storage for.
+    """
+    found = {site["station_triplet"]: site["basin"] for site in sites}
+    configured = cfg.get("roster")
+    if configured:
+        version = configured["version"]
+        station_basins = {
+            triplet: basin
+            for basin, triplets in configured["stations"].items()
+            for triplet in triplets
+        }
+        missing = sorted(set(station_basins) - set(found))
+        if missing:
+            raise ValueError(f"AWDB did not return these roster reservoirs: {missing}")
+        crossed = sorted(t for t, b in station_basins.items() if found[t] != b)
+        if crossed:
+            raise ValueError(
+                f"These roster reservoirs sit in another basin than declared: {crossed}"
+            )
+    else:
+        version = "discovered-active"
+        station_basins = found
+    roster = pd.DataFrame(
+        [
+            {"roster_version": version, "station_triplet": triplet, "basin": basin}
+            for triplet, basin in sorted(station_basins.items())
+        ]
+    )
+    conn.register("_reservoir_roster", roster)
+    conn.execute("CREATE OR REPLACE TABLE reservoir_roster AS SELECT * FROM _reservoir_roster")
+    conn.unregister("_reservoir_roster")
+    logging.info(f"Reservoir roster {version}: {len(roster)} reservoirs")
+    return sorted(station_basins)
+
+
 def ingest_reservoirs(conn: duckdb.DuckDBPyConnection, cfg: dict, basins: dict[str, str]) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS reservoir_sites (
@@ -272,17 +332,26 @@ def ingest_reservoirs(conn: duckdb.DuckDBPyConnection, cfg: dict, basins: dict[s
         )
     """)
     sites = fetch_awdb_stations(cfg["states"], "BOR", basins, elements="RESC")
+    listed = roster_stations(cfg)
+    retired = sorted(set(listed) - {s["station_triplet"] for s in sites})
+    if retired:
+        sites += fetch_awdb_stations(
+            cfg["states"], "BOR", basins, elements="RESC", station_triplets=retired
+        )
     conn.executemany(
         "INSERT OR REPLACE INTO reservoir_sites VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS DATE))",
         [tuple(s.values()) for s in sites],
     )
+    triplets = create_reservoir_roster(conn, sites, cfg)
     max_month = conn.execute("SELECT MAX(month) FROM reservoir_monthly").fetchone()[0]
     start = cfg["start"] if max_month is None else str(max_month - timedelta(days=95))
-    rows = fetch_reservoir_monthly([s["station_triplet"] for s in sites], start)
+    rows = fetch_reservoir_monthly(triplets, start)
     frame = pd.DataFrame(rows, columns=["station_triplet", "month", "storage_kaf"])
     frame["month"] = pd.to_datetime(frame["month"]).dt.date
     upsert(conn, "reservoir_monthly", frame)
-    logging.info(f"{len(sites)} reservoirs; upserted {len(rows)} monthly storage rows from {start}")
+    logging.info(
+        f"{len(triplets)} roster reservoirs; upserted {len(rows)} monthly storage rows from {start}"
+    )
 
 
 def fetch_nrcs_forecasts(station: str, start: str) -> list[tuple]:
@@ -367,11 +436,19 @@ def ingest_usgs_discharge(conn: duckdb.DuckDBPyConnection, cfg: dict) -> None:
 # releases a month around the 8th of the next month and the workflow runs on the 2nd, so the
 # cutoff month has no value at issue time. `tests/test_leakage.py` checks that no model reads
 # one of these names.
-UNAVAILABLE_AT_ISSUE = ("tavg_f_gsl", "prcp_in_gsl")
+# `salinity_gl` is here for a different reason than the climate columns. It is available in
+# principle, but salinity is dissolved salt over volume and elevation is a function of
+# volume, so this month's salinity partly is this month's elevation. A model that read it to
+# predict elevation would predict elevation from itself. Only `salinity_gl_lag1` is
+# published, and `water_balance` derives salinity from the volume it carries itself.
+UNAVAILABLE_AT_ISSUE = ("tavg_f_gsl", "prcp_in_gsl", "salinity_gl")
 
 
 def transform_covariates(
-    conn: duckdb.DuckDBPyConnection, discharge: dict, basins: list[str]
+    conn: duckdb.DuckDBPyConnection,
+    discharge: dict,
+    basins: list[str],
+    delivery_ratio: float = DEFAULT_DELIVERY_RATIO,
 ) -> None:
     """Monthly, complete months only.
 
@@ -387,7 +464,24 @@ def transform_covariates(
     roster grows with dam construction, so early sums are smaller for a physical reason.
 
     The table also holds inflow and breach flow in kaf, north-arm mean elevation, the
-    south-minus-north head, and climate-division mean temperature and precipitation. NOAA
+    south-minus-north head, and climate-division mean temperature and precipitation.
+
+    `salt_mass_mt` is the dissolved salt in the south arm, interpolated from the UGS brine
+    campaigns. `salinity_gl_lag1` divides it by the volume of the month before, because
+    salinity and elevation are 2 readings of the same state: salinity is salt mass over
+    volume, and elevation is a function of volume. A model that reads this month's salinity
+    to predict this month's elevation therefore predicts elevation partly from itself. Only
+    the lagged column is published for that reason.
+
+    KSLC daily weather rolls up to monthly means, with the precipitation summed. NCEI
+    publishes a day about 1 day later, so unlike the nClimDiv columns these describe the
+    cutoff month and are available at issue time. A balance model may read them for a month
+    that has happened. It must force a future month from a climatology instead.
+
+    The 3 inflow gauges are the terminal gauges of their basins. They do not measure the
+    whole delivery to the lake, because minor tributaries, groundwater and the wetland zone
+    lie below them. `inflow_kaf_lake` divides the gauged total by `delivery_ratio` to give an
+    estimate of the whole delivery. `inflow_kaf_total` keeps the gauged sum unchanged. NOAA
     releases a climate month around the 8th of the next month, so the cutoff month has no
     climate value at issue time. Therefore this table holds only the `_lag1` copies of the
     climate columns. The unlagged values stay in `climdiv_monthly`, where no model reads
@@ -404,7 +498,12 @@ def transform_covariates(
             for name, site in exchange.items()
         ]
     )
+    # `inflow_kaf_total` stays NULL unless every gauge reports. Models fitted on it treat it
+    # as a 3-gauge total, so a partial sum under the same name would change what their
+    # coefficients mean. `inflow_kaf_reported` carries the partial sum instead, and
+    # `n_inflow_gauges` says how many gauges are behind it.
     total = " + ".join(f"inflow_kaf_{river}" for river in inflow)
+    reported = " + ".join(f"COALESCE(inflow_kaf_{river}, 0)" for river in inflow)
     inflow_sites = ", ".join(f"'{site}'" for site in inflow.values())
     per_basin = {
         "swe_eom": "swe",
@@ -475,12 +574,11 @@ def transform_covariates(
             SELECT DATE_TRUNC('month', d) AS month, site_id,
                    SUM(discharge_cfs) AS cfs_days, COUNT(*) AS n_days,
                    DAY(LAST_DAY(DATE_TRUNC('month', d))) AS month_days,
+                   COUNT(*) FILTER ({is_provisional_sql("qualifiers")}) AS n_provisional,
                    COUNT(*) FILTER (
-                       LOWER(COALESCE(qualifiers, '')) LIKE '%provisional%'
-                   ) AS n_provisional,
-                   COUNT(*) FILTER (
-                       LOWER(COALESCE(qualifiers, '')) LIKE '%estimated%'
-                   ) AS n_estimated
+                       {has_qualifier_sql("qualifiers", "estimated")}
+                   ) AS n_estimated,
+                   COUNT(*) FILTER ({has_qualifier_sql("qualifiers", "ice")}) AS n_ice
             FROM usgs_discharge_daily
             GROUP BY ALL
         ),
@@ -488,7 +586,7 @@ def transform_covariates(
             SELECT month, site_id,
                    cfs_days / n_days * month_days * 86400.0 / 43560.0 / 1000.0 AS kaf,
                    n_days::DOUBLE / month_days AS day_coverage,
-                   n_provisional, n_estimated
+                   n_provisional, n_estimated, n_ice
             FROM flow_days WHERE n_days >= {MIN_FLOW_DAYS}
         ),
         flow_wide AS (
@@ -499,19 +597,36 @@ def transform_covariates(
                    SUM(n_provisional) FILTER (site_id IN ({inflow_sites}))
                        AS inflow_provisional_days,
                    SUM(n_estimated) FILTER (site_id IN ({inflow_sites}))
-                       AS inflow_estimated_days
+                       AS inflow_estimated_days,
+                   SUM(n_ice) FILTER (site_id IN ({inflow_sites})) AS inflow_ice_days,
+                   COUNT(*) FILTER (site_id IN ({inflow_sites})) AS n_inflow_gauges
             FROM flow GROUP BY month
         ),
         res AS (
-            SELECT month, basin, SUM(storage_kaf) AS kaf, COUNT(*) AS n
-            FROM reservoir_monthly JOIN reservoir_sites USING (station_triplet)
+            SELECT month, basin, SUM(storage_kaf) AS kaf, COUNT(*) AS n,
+                   ANY_VALUE(roster_version) AS roster_version
+            FROM reservoir_monthly JOIN reservoir_roster USING (station_triplet)
             GROUP BY ALL
         ),
         res_wide AS (
             SELECT month,
                    {res_cols},
-                   SUM(kaf) AS res_kaf_total, SUM(n) AS n_reservoirs
+                   SUM(kaf) AS res_kaf_total, SUM(n) AS n_reservoirs,
+                   ANY_VALUE(roster_version) AS reservoir_roster_version
             FROM res GROUP BY month
+        ),
+        salt AS (
+            SELECT month, salt_mass_mt, salt_mass_age_days FROM gsl_salt_mass_monthly
+        ),
+        kslc AS (
+            SELECT DATE_TRUNC('month', d) AS month,
+                   AVG(tmax_c) * 9.0 / 5.0 + 32 AS tmax_f_kslc,
+                   AVG(tmin_c) * 9.0 / 5.0 + 32 AS tmin_f_kslc,
+                   AVG(wind_mps) AS wind_mps_kslc,
+                   SUM(prcp_in) AS prcp_in_kslc,
+                   COUNT(tmax_c)::DOUBLE
+                       / DAY(LAST_DAY(DATE_TRUNC('month', d))) AS kslc_day_coverage
+            FROM {KSLC_TABLE} GROUP BY month
         ),
         north AS (
             SELECT DATE_TRUNC('month', d) AS month, AVG(elevation) AS north_arm_ft
@@ -528,16 +643,27 @@ def transform_covariates(
         )
         SELECT month, s.* EXCLUDE (month), f.* EXCLUDE (month),
                {total} AS inflow_kaf_total,
+               {reported} AS inflow_kaf_reported,
+               ({total}) / {delivery_ratio} AS inflow_kaf_lake,
                r.* EXCLUDE (month),
                n.north_arm_ft, e.avg_elevation - n.north_arm_ft AS head_diff_ft,
+               k.* EXCLUDE (month),
+               sm.salt_mass_mt, sm.salt_mass_age_days,
+               LAG(
+                   sm.salt_mass_mt / NULLIF(hyp.volume_kaf, 0) / {KAF_GL_TO_MT}
+               ) OVER (ORDER BY month) AS salinity_gl_lag1,
                cl.* EXCLUDE (month)
         FROM snow_wide s
         FULL OUTER JOIN flow_wide f USING (month)
         FULL OUTER JOIN res_wide r USING (month)
         FULL OUTER JOIN north n USING (month)
+        FULL OUTER JOIN kslc k USING (month)
+        LEFT JOIN salt sm USING (month)
         FULL OUTER JOIN climate c USING (month)
         LEFT JOIN climate_lag cl USING (month)
         LEFT JOIN monthly_elevation e USING (month)
+        LEFT JOIN gsl_hypsometry hyp
+            ON hyp.elev_ft_ngvd29 = ROUND(e.elevation_eom_ft::DECIMAL(10, 1), 1)
         WHERE month < DATE_TRUNC('month', CURRENT_DATE)
         ORDER BY month
     """)
@@ -549,9 +675,18 @@ def run_covariates(conn: duckdb.DuckDBPyConnection, config: dict) -> None:
     ingest_reservoirs(conn, cov["reservoirs"], cov["snotel"]["basins"])
     ingest_nrcs_forecasts(conn, cov["nrcs_forecasts"])
     ingest_climdiv(conn, cov["climdiv"])
+    ingest_kslc(conn, cov["kslc"])
+    materialize_hypsometry(conn)
+    ingest_brine(conn, cov["brine"])
     ingest_usgs_discharge(conn, cov["usgs_discharge"])
     north = cov["north_arm"]
     ingest_elevation(conn, NORTH_ARM_TABLE, north["site"], ELEVATION_PARAMETER, north["start"])
-    transform_covariates(conn, cov["usgs_discharge"], list(cov["snotel"]["basins"].values()))
+    build_salt_mass(conn, cov["brine"], "usgs_water_surface_elevation_daily")
+    transform_covariates(
+        conn,
+        cov["usgs_discharge"],
+        list(cov["snotel"]["basins"].values()),
+        cov["usgs_discharge"].get("delivery_ratio", DEFAULT_DELIVERY_RATIO),
+    )
     n = conn.execute("SELECT COUNT(*) FROM monthly_covariates").fetchone()[0]
     logging.info(f"monthly_covariates has {n} rows")
