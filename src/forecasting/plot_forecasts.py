@@ -62,7 +62,7 @@ def build_plot(actuals: pd.DataFrame, forecasts: pd.DataFrame):
         + geom_vline(xintercept=cutoff, linetype="dotted", color="#888888", size=0.5)
         + scale_x_datetime(date_labels="%Y", date_breaks="2 years")
         + labs(
-            title="Great Salt Lake — Monthly Average Elevation",
+            title="Great Salt Lake South Arm — Monthly Mean Elevation",
             subtitle="Historical observations with out-of-sample model forecasts",
             x=None,
             y="Elevation (ft)",
@@ -93,7 +93,7 @@ def plot_forecasts(
     actuals, forecasts = load_plot_data(config["database"]["path"], history_years)
 
     if forecasts.empty:
-        raise RuntimeError("No forecasts found in database — run run_forecast.py first.")
+        raise RuntimeError("The database has no forecasts. Run gsl-forecast first.")
 
     plot = build_plot(actuals, forecasts)
     plot.save(output_path, dpi=150, verbose=False)
@@ -102,7 +102,9 @@ def plot_forecasts(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot GSL forecast results")
+    parser = argparse.ArgumentParser(
+        description="Plot stored south-arm monthly elevation forecasts"
+    )
     parser.add_argument("--config", help="Path to config file")
     parser.add_argument("--output", help="Output PNG path (default: <output_dir>/gsl_forecast.png)")
     parser.add_argument("--history-years", type=int, default=10, help="Years of history to show")

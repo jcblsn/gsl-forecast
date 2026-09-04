@@ -1,9 +1,8 @@
-"""Experimental structural state-space forecast on south-arm storage.
+"""Experimental structural state-space forecast of south-arm storage.
 
-The hypsometry converts monthly-mean elevation to storage before fitting. A standard local
-linear trend with deterministic monthly seasonality evolves that storage, and the forecast is
-converted back to elevation. This is a statistical structural time-series model. It does not
-claim to close a water balance or use forecast inflow as if it were known.
+Hypsometry converts monthly mean elevation to storage. A local linear trend with
+deterministic monthly seasonality evolves that storage before conversion back to elevation.
+This statistical model does not close a physical water balance.
 """
 
 from datetime import date
@@ -71,7 +70,7 @@ class StateSpaceForecaster(Forecaster):
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
         if h < 1:
-            raise ValueError("Forecast horizon must be positive")
+            raise ValueError("Forecast length must be positive")
         return self._result.get_forecast(h)
 
     def predict(self, h: int, start_date: date | None = None) -> pd.DataFrame:

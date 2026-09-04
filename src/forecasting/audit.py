@@ -1,15 +1,8 @@
-"""Close the south-arm water balance and report what does not close.
+"""Report residuals from the experimental south-arm storage balance.
 
-This answers one question: is the data good enough to conserve volume? It converts the
-end-of-month elevation to storage, subtracts the measured fluxes, and reports what is left.
-
-The residual is `net_unmeasured_flux`. It is not evaporation and it is not consumptive use.
-It holds the causeway exchange, the error in the gauged-to-delivered inflow ratio, the error
-in the bathymetry, and the part of evaporation the temperature term does not explain.
-
-A residual that is stable across elevation bands and across held-out periods says the
-measurement system is consistent. A residual that moves with the lake says a term that
-matters is missing, and that no amount of model fitting will repair it.
+The audit converts monthly elevation to storage and subtracts modeled fluxes. Its residual
+combines omitted fluxes, measurement error, input approximations, and model misspecification;
+it cannot identify any one cause. Grouped and held-out summaries test stability only.
 """
 
 import argparse
@@ -73,12 +66,7 @@ def summarize(rows: pd.DataFrame, by: str) -> pd.DataFrame:
 
 
 def gauged_closure(rows: pd.DataFrame) -> pd.DataFrame:
-    """What the balance looks like with the gauged inflow alone and nothing else.
-
-    This is the starting point the project was at: no evaporation term, no lake
-    precipitation, no delivery correction. It is reported so the value of each added term is
-    visible rather than asserted.
-    """
+    """Compare residual spread for gauged inflow alone and the full fitted balance."""
     naive = rows["delta_v"] - rows[INFLOW_COL]
     depth = naive * 1000.0 / rows["area_prev"]
     return pd.DataFrame(
@@ -91,10 +79,7 @@ def gauged_closure(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def holdout_stability(data: pd.DataFrame, folds: int = 3) -> pd.DataFrame:
-    """Fit on all but one block of years and report the residual on the block held out.
-
-    A closure that only holds where it was fitted is a fitted constant, not a measurement.
-    """
+    """Fit outside each year block and summarize residuals inside the held-out block."""
     df = data.sort_values("month").reset_index(drop=True)
     years = df["month"].dt.year
     edges = np.array_split(np.array(sorted(years.unique())), folds)
@@ -143,7 +128,7 @@ def render(data: pd.DataFrame) -> tuple[str, dict]:
         "Residual by issue season",
         summarize(rows, "season").round(3).to_string(index=False),
         "",
-        "Residual by elevation band (ft NGVD29)",
+        "Residual by elevation band (ft NGVD 29)",
         summarize(rows, "band").round(3).to_string(index=False),
         "",
         "Stability on held-out years",
@@ -164,7 +149,9 @@ def render(data: pd.DataFrame) -> tuple[str, dict]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Audit the closure of the south-arm balance")
+    parser = argparse.ArgumentParser(
+        description="Audit closure of the experimental south-arm storage balance"
+    )
     parser.add_argument("--config", help="Path to config file")
     parser.add_argument("--json", help="Write the audit payload to this path")
     parser.add_argument(

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gsl-forecast"
 version = "0.1.0"
-description = "Forecasting the Great Salt Lake's depth"
+description = "Experimental forecasts of Great Salt Lake south-arm monthly mean elevation"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

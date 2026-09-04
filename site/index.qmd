@@ -10,7 +10,7 @@ status = FileAttachment("data/status.json").json()
 targets = bundle.targets ?? []
 headline = targets[0]
 formatMonth = (value) => value ? new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {month: "long", year: "numeric"}) : "Pending"
-formatFeet = (value) => Number.isFinite(value) ? `${value.toFixed(2)} ft` : "Not available"
+formatFeet = (value) => Number.isFinite(value) ? `${value.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})} ft` : "Not available"
 formatValue = (value) => Number.isFinite(value) ? value.toFixed(3) : "Not used"
 formatContribution = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(3)} ft` : "Not available"
 stale = status.attempted_issue && bundle.issue && status.attempted_issue !== bundle.issue
@@ -33,51 +33,30 @@ headlineView = headline ? html`<section class="headline-band">
   </dl>
 </section>` : html`<section class="headline-band pending">
   <div><p class="eyebrow">Next monthly mean</p><p class="headline-number">Pending</p>
-  <p class="range">The first complete headline issue has not run.</p></div>
+  <p class="range">No complete headline issue is available.</p></div>
 </section>`
 ```
 
 ```{ojs}
 //| echo: false
 staleNotice = stale
-  ? html`<div class="data-notice" role="status">The latest run had incomplete inputs. This page keeps the complete ${bundle.issue} issue.</div>`
+  ? html`<div class="data-notice" role="status">The latest run had incomplete inputs. This page retains the complete issue from ${bundle.issue}.</div>`
   : html``
 ```
 
-::: {.callout-warning title="Experimental prototype"}
-This is not yet a quality release or a validated operational product. Target observations
-before 1990 have materially different temporal support. The displayed band is a nominal
-central 90% interval calibrated from retrospective errors, at 1 lead at a time and for the
-season the issue falls in; observed coverage is about 85–90% at reported key leads. The point
-line is not necessarily the interval median. Development results demonstrate no advantage over
-persistence at 12–24 months, and the prototype `blend` is worse than persistence at lead 24.
+::: {.callout-warning title="Research prototype"}
+This forecast is experimental. It has not been validated for operational use. In repeatedly used development data, the headline model’s mean absolute error is 0.13, 0.33, and 0.58 ft. These values apply at leads 1, 3, and 6. Persistence errors are 0.34, 0.90, and 1.33 ft. At lead 24, the headline model is worse than persistence: 1.92 versus 1.79 ft. These results come from 157 overlapping monthly cutoffs, or about 13 water years, rather than an independent test.
 :::
 
-## What this page shows
+## Purpose and scope
 
-This page gives an experimental monthly forecast of the water surface elevation of the Great Salt Lake.
-The gauge is USGS 10010000 at Saltair, on the south arm. Elevation is in feet above sea
-level. Each value is the mean over the days of one calendar month.
+This page reports a dated forecast of the calendar-month mean water-surface elevation of the Great Salt Lake’s south arm. The measurement comes from USGS gauge 10010000 at Saltair Boat Harbor. Elevation is in feet above the National Geodetic Vertical Datum of 1929 (NGVD 29); it is not the lake’s depth.
 
-The forecast covers the next 24 months. The number of months ahead is the lead. A new
-experimental issue goes out at the start of each month, and it uses data through the end of
-the month before. That date is the issue date.
-
-The forecast is a range, not one number. The nominal 90% interval comes from the errors of
-the repeatedly used retrospective development cohort, at 1 lead at a time and for the season
-the issue falls in. It contains about 85–90% of observations at the reported key leads. It is
-not a guarantee that 90 of the next 100 values will fall inside. A longer lead generally gives
-a wider interval, and an issue in the accumulation season gives a wider interval than the same
-lead in the recession season.
+The forecast uses data through the last complete calendar month and covers the next 24 monthly means. Lead 1 is the issue month. Lead 24 is 23 calendar months after the issue date. The main evidence supports use as a short-range research forecast. It does not support a claim of 24-month skill over persistence.
 
 ## Forecast path
 
-The solid line is the record from the gauge. The coloured line is the model's point forecast,
-which is not necessarily the interval median. The band is the nominal central 90% interval
-around it, and it generally gets wider at longer leads.
-
-The dashed line marks 4,190 ft. Below that level, Utah law permits an increase to the
-causeway berm, which separates the 2 arms of the lake.
+The dark line shows observed monthly means. The colored line shows the headline point forecast. The band is a nominal central 90% interval calibrated from retrospective errors for the same lead and issue season. The point forecast is estimated separately and need not equal the interval median.
 
 ```{ojs}
 //| echo: false
@@ -85,44 +64,37 @@ history = (bundle.observations ?? []).map(d => ({...d, month: new Date(`${d.mont
 path = targets.map(d => ({...d, month: new Date(`${d.month}T00:00:00`)}))
 forecastPlot = path.length ? Plot.plot({
   height: 410,
-  marginLeft: 62,
+  marginLeft: 72,
   marginBottom: 44,
   x: {label: null, grid: false},
-  y: {label: "Elevation (ft)", grid: true},
+  y: {label: "Elevation (ft NGVD 29)", grid: true},
   marks: [
     Plot.areaY(path, {x: "month", y1: "q05", y2: "q95", fill: "#98c9cb", fillOpacity: 0.42}),
     Plot.lineY(history, {x: "month", y: "elevation", stroke: "#202a27", strokeWidth: 2}),
     Plot.lineY(path, {x: "month", y: "pred", stroke: "#087f8c", strokeWidth: 3}),
-    Plot.dot(path.slice(0, 1), {x: "month", y: "pred", fill: "#c84a3d", r: 5}),
-    Plot.ruleY([4190], {stroke: "#c49a27", strokeDasharray: "5,4"}),
-    Plot.text([{month: history[0]?.month ?? path[0].month, y: 4190}], {x: "month", y: "y", text: ["4,190 ft"], fill: "#c49a27", dy: -8, textAnchor: "start", fontSize: 11})
+    Plot.dot(path.slice(0, 1), {x: "month", y: "pred", fill: "#c84a3d", r: 5})
   ]
-}) : html`<p class="empty-state">Forecast data will appear after the next complete run.</p>`
+}) : html`<p class="empty-state">Forecast data will appear after a complete issue.</p>`
 ```
 
-## What moves the forecast
+### How to interpret the interval
 
-The model adds up a small number of terms to get each forecast. This chart shows those
-terms for the target month you select.
+The interval is marginal, not a set of simulated lake trajectories. It gives a separate range for each lead. It does not give the entire path a 90% chance of staying inside the band. It also gives no probability for the spring maximum or the date of a minimum.
 
-The reference path is the forecast for an average year. Each bar is the amount that one
-input adds to, or removes from, the reference path. An input adds to the forecast when its
-current value is above its historical average, and removes from the forecast when it is
-below. The reference path and the bars add to the forecast.
+In development evaluation, the nominal 90% interval contains 87% of observations at leads 6 and 12 in aggregate. Lead-6 coverage varies by issue season, from 77% for April–June issues to 92% for July–October issues. Historical evaluation also uses revised source data rather than the exact values available on each past issue date.
 
-The bars show how the model works. They do not show cause and effect. The inputs move
-together, so no single bar is the result of a change to that input alone.
+## Model inputs
+
+The chart decomposes the selected point forecast into the terms of the fitted covariate model. The reference path is the fitted value when its inputs equal their training means. Each bar is the fitted contribution from the current input’s difference from that mean. The reference path and all bars sum to the point forecast.
+
+These contributions describe the regression. They do not show cause and effect because the inputs vary together and the data are observational.
 
 The inputs are:
 
-- Current lake level: the elevation in the last complete month.
-- Snow water equivalent: the depth of water held in the mountain snowpack, in inches. It is
-  the earliest measure of how much water will reach the lake in the spring.
-- Precipitation so far this water year: rain and snow at the same mountain sites since
-  October 1, in inches.
-- Difference between the 2 arms: the level of the south arm minus the level of the north
-  arm. A railway causeway divides the lake, and the state manages the gap in it, so this
-  number records that decision.
+- Current lake elevation: the south-arm monthly mean in the last complete month.
+- Snow water equivalent: the depth of liquid water stored in mountain snowpack, in inches.
+- Water-year precipitation: rain and snow measured since October 1 at the same mountain sites, in inches.
+- Difference between the arms: south-arm elevation minus north-arm elevation, in feet.
 
 ```{ojs}
 //| echo: false
@@ -131,10 +103,10 @@ viewof selectedH = Inputs.select(targetOptions, {label: "Target month", format: 
 selectedLead = selectedH.value
 selected = targets.find(d => d.h === selectedLead)
 labels = ({
-  avg_elevation: "Current lake level",
+  avg_elevation: "Current lake elevation",
   swe_eom_gsl: "Snow water equivalent",
-  prec_wy_eom_gsl: "Precipitation so far this water year",
-  head_diff_ft: "Difference between the 2 arms"
+  prec_wy_eom_gsl: "Water-year precipitation",
+  head_diff_ft: "Difference between the arms"
 })
 drivers = (selected?.contributions ?? [])
   .filter(d => d.input !== "reference_path")
@@ -145,9 +117,9 @@ reference = (selected?.contributions ?? []).find(d => d.input === "reference_pat
 ```{ojs}
 //| echo: false
 driverSummary = selected ? html`<div class="target-summary">
-  <span><strong>${formatFeet(selected.pred)}</strong> forecast</span>
-  <span><strong>${Math.round((selected.covariate_weight ?? selected.snow_weight ?? 0) * 100)}%</strong> from the covariate models</span>
-  <span><strong>${formatFeet(reference?.contribution_ft)}</strong> reference path</span>
+  <span>${formatFeet(selected.pred)} point forecast</span>
+  <span>${Math.round((selected.covariate_weight ?? selected.snow_weight ?? 0) * 100)}% covariate-model weight</span>
+  <span>${formatFeet(reference?.contribution_ft)} reference path</span>
 </div>` : html``
 ```
 
@@ -164,7 +136,7 @@ driverPlot = drivers.length ? Plot.plot({
     Plot.barX(drivers, {x: "contribution_ft", y: "label", fill: d => d.contribution_ft < 0 ? "Lower" : "Raise", tip: true}),
     Plot.ruleX([0], {stroke: "#202a27"})
   ]
-}) : html`<p class="empty-state">Input contributions will appear with the first complete issue.</p>`
+}) : html`<p class="empty-state">Input contributions will appear after a complete issue.</p>`
 ```
 
 ```{ojs}
@@ -173,19 +145,16 @@ driverDetails = drivers.length ? html`<dl class="driver-values">
   ${drivers.map(d => html`<div>
     <dt>${d.label}</dt>
     <dd class="driver-contribution">${formatContribution(d.contribution_ft)}</dd>
-    <dd>Input ${formatValue(d.value)}; historical mean ${formatValue(d.reference)}</dd>
+    <dd>Current ${formatValue(d.value)}; training mean ${formatValue(d.reference)}</dd>
   </div>`)}
 </dl>` : html``
 ```
 
-## Every model in this issue
+## Model comparison
 
-The project runs more than one model. The number at the top of this page comes from the
-prototype headline model, and the others are comparisons. A simple model that repeats the
-last value is the lowest bar that a useful model must clear. No model has demonstrated an
-advantage over that baseline across leads 12–24 in the current development evaluation.
+The headline `blend` combines a snowpack regression with a damped seasonal time-series model. The issue also exports simpler models for comparison. `naive_last`, which repeats the last monthly mean, is the persistence benchmark. The headline model is not the best development candidate at every lead, and the table should not be read as a ranking of validated products.
 
-The table gives elevation in feet at 3, 6, 12 and 24 months after the issue date.
+The values below are point forecasts in feet NGVD 29 at 3, 6, 12, and 24 monthly steps from the last observed month.
 
 ```{ojs}
 //| echo: false
@@ -195,30 +164,27 @@ modelRows = d3.groups(bundle.models ?? [], d => d.model)
   .sort((a, b) => d3.ascending(a.model, b.model))
 modelTable = modelRows.length ? Inputs.table(modelRows, {
   columns: ["model", ...modelLeads.map(h => `h${h}`)],
-  header: Object.fromEntries([["model", "Model"], ...modelLeads.map(h => [`h${h}`, `${h} mo`])]),
+  header: Object.fromEntries([["model", "Model"], ...modelLeads.map(h => [`h${h}`, `Lead ${h}`])]),
   format: Object.fromEntries(modelLeads.map(h => [`h${h}`, v => Number.isFinite(v) ? v.toFixed(2) : "—"])),
   rows: 20
-}) : html`<p class="empty-state compact">Model comparison appears with the first complete issue.</p>`
+}) : html`<p class="empty-state compact">Model comparisons will appear after a complete issue.</p>`
 ```
 
-## Data vintage
+## Data and provenance
 
-The forecast is only as current as its inputs. This table gives the state of the data on the
-issue date.
-
+Forecast accuracy depends on the age and completeness of the inputs. The issue records its last complete month and the number of daily gauge readings. It also records the SNOTEL site count and any required covariates missing at the cutoff.
 
 ```{ojs}
 //| echo: false
 vintage = bundle.vintage ?? {}
 vintageView = html`<dl class="driver-values">
   <div><dt>Last complete month</dt><dd>${vintage.data_max ?? "Pending"}</dd></div>
-  <div><dt>Daily gauge readings in it</dt><dd>${vintage.observation_count ?? "Pending"}</dd></div>
-  <div><dt>SNOTEL sites reporting</dt><dd>${vintage.n_snotel_sites ?? "Pending"}</dd></div>
-  <div><dt>Covariates missing at the cutoff</dt><dd>${(vintage.missing_covariates ?? []).length ? vintage.missing_covariates.join(", ") : "none"}</dd></div>
+  <div><dt>Daily gauge readings</dt><dd>${vintage.observation_count ?? "Pending"}</dd></div>
+  <div><dt>SNOTEL sites recorded</dt><dd>${vintage.n_snotel_sites ?? "Pending"}</dd></div>
+  <div><dt>Missing required covariates</dt><dd>${(vintage.missing_covariates ?? []).length ? vintage.missing_covariates.join(", ") : "none"}</dd></div>
 </dl>`
 ```
 
-<div class="method-link">
-[Read the model specification](methodology.qmd) for the equations, the source and the
-release date of each input, the test procedure, and what the numbers do not show.
-</div>
+Each dated issue has a write-once CSV and metadata sidecar. A complete headline issue also has an explanation sidecar. The current export code records the issue status, model version, code state, data and configuration hashes, input support, and interval calibration. Older issues can predate some fields.
+
+Read [Method and evidence](methodology.qmd) for the equations, source timing, evaluation design, limitations, code links, and primary data sources. The [dated forecast record](https://github.com/jcblsn/gsl-forecast/tree/main/forecasts) is available with the source code.

@@ -1,4 +1,4 @@
-"""`gsl-results` is step 1 of the loop in docs/program.md, so it must not raise."""
+"""Tests for reading and displaying experiment results."""
 
 import json
 import os

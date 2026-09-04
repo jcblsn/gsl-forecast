@@ -1,9 +1,8 @@
-"""Headline scalars scored from walk-forward CV output.
+"""Calculate two decision-oriented summaries from walk-forward predictions.
 
-The two reported summaries are the maximum April-June monthly mean and the September monthly
-mean at water-year end. This module extracts them from per-cutoff CV predictions for cutoffs
-that correspond to the operational issue dates: the April-June maximum from outlooks issued
-January 1 through May 1, and the September mean from January 1 through August 1.
+The summaries are the maximum April-June monthly mean and the September monthly mean at
+water-year end. Evaluated issue dates run from January 1 through May 1 for the spring maximum
+and through August 1 for the September mean.
 """
 
 from collections.abc import Iterator

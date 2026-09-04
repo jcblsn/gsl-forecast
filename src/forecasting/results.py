@@ -1,12 +1,8 @@
-"""The committed record of one cross-validation run.
+"""Read, verify, and display the committed cross-validation summary.
 
-The experiment tracker database is a working file that `.gitignore` excludes, so it cannot be
-the citation for a published number. `gsl-cv` writes a snapshot of the run under
-`data/results/`, which the repository keeps. This module reads that snapshot back into the 2
-tables the README and `docs/model-spec.md` are rendered from.
-
-The snapshot is written by the tracker, not here, so it also carries the commit, the tree
-state and the command line that produced the numbers.
+The experiment database and row-level predictions are local working files. `gsl-cv` can export
+a compact summary to `data/results/`. Its manifest records file hashes, the source commit, the
+working-tree state, and the command that produced the summary.
 """
 
 import csv
@@ -218,7 +214,7 @@ def mae_table(summary: pd.DataFrame, models: list[str], headline_model: str) -> 
 
 
 def interval_table(summary: pd.DataFrame, models: list[str]) -> str:
-    """Weighted interval score and 90% coverage at the leads the README reports.
+    """Weighted interval score and 90% coverage at selected reporting leads.
 
     The snapshot also holds the mean pinball loss, which is exactly half the weighted
     interval score for this symmetric quantile set. The table prints the score that has a
@@ -271,7 +267,7 @@ def render_tables(
     models: list[str] | None = None,
     baseline: str = "naive_last",
 ) -> str:
-    """The Markdown for the README's frozen development tables."""
+    """Render Markdown inspection tables from the frozen development snapshot."""
     columns = _order_models(summary, models, baseline)
     headline_model = meta.get("headline_model") or columns[0]
     commit = (meta.get("git_commit") or "")[:12]

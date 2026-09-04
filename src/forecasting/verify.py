@@ -93,7 +93,9 @@ def summarize(scored: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Verify dated forecasts against observations")
+    parser = argparse.ArgumentParser(
+        description="Score dated forecasts against observed monthly means"
+    )
     parser.add_argument("--config")
     parser.add_argument("--forecast-dir", default="forecasts")
     parser.add_argument("--out", default=os.path.join("forecasts", "verification.csv"))

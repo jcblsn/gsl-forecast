@@ -1,10 +1,8 @@
-"""Shared estimator for the multivariate models.
+"""Shared ridge estimator for the multivariate models.
 
-The design matrix mixes columns on very different scales: the lake level is about 4192 feet
-and the snowpack is about 10 inches. A single penalty cannot act on both columns, so the
-estimator standardises the design, solves the penalised system, and maps the coefficients
-back. Each fit has 32 to 47 rows and 4 parameters, so the penalty is chosen per fit by
-generalised cross-validation over the rows of that fit.
+The estimator standardizes predictors before applying 1 penalty, then restores their original
+scales. With `alpha=None`, it selects the penalty within each fit by generalized
+cross-validation.
 """
 
 import logging
@@ -15,18 +13,12 @@ import pandas as pd
 TIME_COL = "month"
 TARGET_COL = "avg_elevation"
 ALPHA_GRID = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 3.0, 10.0, 30.0, 100.0)
-# One fit reads the rows of a single calendar month, so the record supplies about 1 row per
-# year. 10 rows against 4 or 5 parameters is thin, and the review calls the bar too
-# permissive. Raising it was measured and reverted: the bar never binds on an outer fit
-# (swe_head scores identically at 10, 15 and 20), and where it does bind, on the early inner
-# cutoffs of the blend's weight pass, it degrades the weights instead of protecting a fit.
-# The blend's lead-6 MAE rises from 0.578 to 0.595 to 0.626 ft at 10, 15 and 20. The real
-# repair is a pooled model across issue months and leads, not a higher bar on 288 fits.
+# Same-month fits contain about 1 row per year. This floor prevents fits on fewer than 10 rows.
 MIN_OBS = 10
 
 
 def _standardize(X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Centre and scale the columns after the leading intercept column."""
+    """Center and scale the columns after the leading intercept column."""
     features = X[:, 1:]
     mean = features.mean(axis=0)
     scale = features.std(axis=0)
@@ -35,7 +27,7 @@ def _standardize(X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def gcv_alpha(Z: np.ndarray, y_centered: np.ndarray, grid=ALPHA_GRID) -> float:
-    """The penalty in `grid` with the lowest generalised cross-validation score.
+    """Return the penalty with the lowest generalized cross-validation score.
 
     The score is n * RSS / (n - df)^2, where df counts the intercept plus the ridge trace.
     Only the rows of this fit enter, so the choice uses no data after the cutoff.
@@ -57,11 +49,11 @@ def gcv_alpha(Z: np.ndarray, y_centered: np.ndarray, grid=ALPHA_GRID) -> float:
 
 
 def ridge_fit(X: np.ndarray, y: np.ndarray, alpha: float | None = None) -> np.ndarray:
-    """Least squares with a ridge penalty on the standardised non-intercept columns.
+    """Fit least squares with a ridge penalty on standardized predictors.
 
     `X` carries a leading column of ones. The returned coefficients are on the original
     scale, so a caller still evaluates `x @ beta` with the same leading 1. With `alpha` None
-    the penalty comes from generalised cross-validation; a float switches the search off.
+    the penalty comes from generalized cross-validation; a float disables the search.
     """
     y = np.asarray(y, dtype=float)
     if X.shape[1] == 1:
@@ -97,17 +89,10 @@ def select_features(
     min_obs: int,
     scale_reference: pd.DataFrame,
 ) -> tuple[list[str], dict[str, str]]:
-    """The features one fit may use, and the reason it drops each of the others.
+    """Return usable predictors and the reason for each exclusion.
 
-    A fit drops a feature that is NULL at the cutoff, that too few training rows carry, or
-    that barely varies among those rows. Dropping one feature no longer drops the others.
-
-    The variation rule matters because features depend on the issue season. Snow water
-    equivalent is structurally 0 at an August cutoff. The standardised ridge divides by that
-    near-zero standard deviation and returns a coefficient of hundreds of feet per inch. The
-    forecast contribution stays small because the input is near 0, but the coefficient is a
-    diagnostic failure. `scale_reference` gives the same column over every month, so the
-    rule compares a season with the whole record and needs no unit-specific threshold.
+    The fit excludes a predictor that is missing at the cutoff, too sparse, or nearly constant.
+    The full training frame supplies a unit-free reference scale for the variation check.
     """
     kept, dropped = [], {}
     for feature in features:

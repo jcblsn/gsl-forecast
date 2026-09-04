@@ -1,14 +1,8 @@
-"""Check the reconstructed salinity against an independently compiled record.
+"""Compare reconstructed salinity with an external HydroShare density compilation.
 
-The salt-mass trajectory this project uses comes from one UGS site, AS2. A reconstruction
-from one site could be wrong in a way that its own data cannot show. Trout, Null and others
-compiled the open-water observations from every source into one dataset and published it on
-HydroShare, so it is an outside check on the same quantity.
-
-That dataset reports density, not salinity. The conversion is not assumed: the UGS record
-carries both for 1371 shallow samples, and the relation between them is fitted on those
-pairs. It is close to exact (R-squared 0.9995, 0.80 g/L), which is expected, because for a
-brine of one composition density is a measure of concentration.
+The check fits a density-to-salinity conversion on paired shallow UGS samples, then compares
+monthly south-arm values. Shared observations or methods may remain, so agreement is a
+cross-check rather than an independent validation.
 """
 
 import logging
@@ -43,7 +37,7 @@ def density_to_salinity(samples: pd.DataFrame) -> tuple[float, float, float]:
 
 
 def fetch_independent_salinity(slope: float, intercept: float) -> pd.DataFrame:
-    """Monthly south-arm salinity from the HydroShare open-water density compilation."""
+    """Return monthly south-arm salinity from the external HydroShare compilation."""
     text = get_with_retry(HYDROSHARE, timeout=300).text
     raw = pd.read_csv(pd.io.common.StringIO(text))
     raw.columns = [c.strip() for c in raw.columns]
@@ -64,10 +58,10 @@ def fetch_independent_salinity(slope: float, intercept: float) -> pd.DataFrame:
 
 
 def compare(db_path: str) -> pd.DataFrame:
-    """Reconstructed salinity beside the independent record, month by month."""
+    """Compare reconstructed salinity with the external record by month."""
     with duckdb.connect(db_path, read_only=True) as conn:
         samples = conn.execute("SELECT * FROM gsl_brine_samples").fetchdf()
-        modelled = conn.execute("""
+        reconstructed = conn.execute("""
             SELECT c.month, c.salt_mass_mt, h.volume_kaf
             FROM monthly_covariates c
             LEFT JOIN monthly_elevation e USING (month)
@@ -79,10 +73,12 @@ def compare(db_path: str) -> pd.DataFrame:
     logging.info(
         f"density to salinity: {slope:.1f} * density {intercept:+.1f}, rmse {rmse:.2f} g/L"
     )
-    modelled["month"] = pd.to_datetime(modelled["month"])
-    modelled["reconstructed_gl"] = modelled["salt_mass_mt"] / modelled["volume_kaf"] / KAF_GL_TO_MT
+    reconstructed["month"] = pd.to_datetime(reconstructed["month"])
+    reconstructed["reconstructed_gl"] = (
+        reconstructed["salt_mass_mt"] / reconstructed["volume_kaf"] / KAF_GL_TO_MT
+    )
     independent = fetch_independent_salinity(slope, intercept)
-    joined = modelled.merge(independent, on="month", how="inner").dropna(
+    joined = reconstructed.merge(independent, on="month", how="inner").dropna(
         subset=["reconstructed_gl", "independent_gl"]
     )
     joined["difference_gl"] = joined["reconstructed_gl"] - joined["independent_gl"]
@@ -92,7 +88,7 @@ def compare(db_path: str) -> pd.DataFrame:
 def render(db_path: str) -> str:
     joined = compare(db_path)
     if joined.empty:
-        return "No overlapping months between the reconstruction and the independent record."
+        return "No overlapping months between the reconstruction and the external record."
     difference = joined["difference_gl"]
     correlation = joined["reconstructed_gl"].corr(joined["independent_gl"])
     return "\n".join(
@@ -104,11 +100,9 @@ def render(db_path: str) -> str:
             f"Correlation               {correlation:.3f}",
             f"Mean difference           {difference.mean():+.1f} g/L",
             f"Mean absolute difference  {difference.abs().mean():.1f} g/L",
-            f"Independent series spread {joined['independent_gl'].std():.1f} g/L",
+            f"External series spread    {joined['independent_gl'].std():.1f} g/L",
             "",
-            "A mean difference near 0 says the level of the reconstruction is right. A high",
-            "correlation says its shape is right. The published daily version of this record",
-            "states an uncertainty of about 12 g/L on a given day, so a difference inside",
-            "that band is agreement.",
+            "Mean difference summarizes bias and correlation summarizes co-variation.",
+            "Neither statistic validates individual months or establishes independence.",
         ]
     )

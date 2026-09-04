@@ -1,19 +1,9 @@
-"""Block-bootstrap uncertainty for the cross-validation numbers.
+"""Estimate cross-validation sensitivity with a circular moving-block bootstrap.
 
-The 157 development cutoffs overlap heavily. A 24-month forecast from one cutoff shares 23
-of its target months with the next cutoff, so 157 errors are nowhere near 157 independent
-cases: the cohort spans about 13 hydrologic years. Treating the errors as independent would
-make a 0.01 ft difference between 2 models look decisive.
-
-A circular moving-block bootstrap over the cutoff sequence keeps that dependence. It
-resamples runs of consecutive cutoffs rather than single cutoffs, so a resample carries the
-serial structure of the lake and of the weather that drives it. The block length is 24
-months, which is the forecast horizon and therefore the span over which 2 cutoffs can share
-a target month.
-
-These are descriptive sensitivity estimates. They are not formal sampling intervals under a
-fully specified data-generating process, and they do not prove stationarity. They are a
-better statement of evidential precision than a 3-decimal rank table.
+Adjacent 24-month forecasts share 23 target months, so cutoff errors are dependent. The
+default resamples 24-cutoff blocks to retain some serial structure. Returned intervals are
+descriptive; they are not formal confidence intervals and assume the observed sequence is a
+useful basis for resampling.
 """
 
 import numpy as np

@@ -1,27 +1,9 @@
-"""A monthly water balance for the south arm, in storage rather than in elevation.
+"""Experimental monthly storage balance for the south arm.
 
-Every other model here relates elevation to elevation. This one conserves volume:
-
-    V[t] = V[t-1] + Q[t]/k + P[t]*A[t-1] - E[t]*A[t-1] + R[season, t]
-
-`Q` is the gauged tributary inflow, divided by `k` because the 3 gauges are terminal gauges
-and do not measure the whole delivery to the lake. `P` is precipitation on the lake and `E`
-is evaporation depth, both multiplied by the area of the month before, because the area is
-part of the state and using this month's area would use the answer. `R` is what is left. It
-is named `net_unmeasured_flux` and it is not called evaporation: it also holds the causeway
-exchange, the error in `k`, and the error in the bathymetry.
-
-Evaporation is a Hargreaves reference depth from the KSLC daily temperature range, scaled by
-a fitted coefficient and suppressed by salinity. Salinity is the carried salt mass over the
-carried volume, so the model never reads a salinity that a future month would supply.
-
-Elevation and volume are 2 readings of one state, so a monthly mean elevation is not the
-state this equation steps. The model steps end-of-month storage and converts back to a
-monthly mean through a centred observation operator.
-
-Forcing beyond the cutoff: inflow comes from the same snowpack regression `inflow_chain`
-uses, and the weather comes from a calendar-month climatology of KSLC. Neither reads a value
-from after the cutoff.
+The model adds tributary inflow and precipitation, then subtracts salinity-adjusted reference
+evaporation. A fitted residual combines unmeasured flux and measurement error. The state is
+end-of-month storage; a centered observation operator converts it to monthly mean elevation.
+Future inflow comes from a snowpack regression, and future weather uses monthly climatology.
 """
 
 from datetime import date
@@ -165,7 +147,7 @@ class WaterBalanceForecaster(Forecaster):
     def _design(self, df: pd.DataFrame, salt_coefficient: float) -> tuple[np.ndarray, np.ndarray]:
         """Rows against dV, with a leading column of ones.
 
-        `ridge_fit` reads column 0 as the unpenalised intercept and standardises the rest,
+        `ridge_fit` reads column 0 as the unpenalized intercept and standardizes the rest,
         so the leading ones column is part of its contract and not a spare term.
         """
         area = df["area_prev"].to_numpy(dtype=float)

@@ -1,14 +1,8 @@
-"""Daily weather at the Salt Lake City airport from the NCEI daily-summaries service.
+"""Fetch NCEI daily summaries for the configured Salt Lake City airport station.
 
-The lake evaporates under the conditions over the lake. The nearest long station that
-measures those conditions daily is KSLC, GHCN-D station USW00024127, about 8 km from the
-south shore. The nClimDiv columns average a whole climate division over a month and are
-released around the 8th of the next month, so they cannot force a monthly balance for the
-cutoff month. NCEI publishes a daily summary about 1 day after the day, so the cutoff month
-is complete when the forecast runs on the 2nd.
-
-Temperatures arrive in tenths of a degree Celsius, wind in tenths of a metre per second and
-precipitation in tenths of a millimetre. The reader converts each one on the way in.
+The station is an experimental proxy for conditions over the lake, not a lake measurement.
+The reader converts NCEI's scaled temperature, wind, and precipitation fields to the units
+used by the storage-balance model.
 """
 
 import logging

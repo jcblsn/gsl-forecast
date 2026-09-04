@@ -1,11 +1,4 @@
-"""Covariates for the lake forecast: SNOTEL snowpack, USGS tributary discharge, the
-causeway breach flow and the north-arm elevation.
-
-SNOTEL sites are discovered from the NRCS AWDB station list by hydrologic unit and labelled
-by basin (Bear, Weber, Provo-Jordan). Inflow comes from the three gauges the Strike Team
-uses. Everything lands in DuckDB next to the elevation tables and is rolled up to a
-`monthly_covariates` table aligned with `monthly_elevation`.
-"""
+"""Build monthly snow, storage, flow, weather, salinity, and north-arm covariates."""
 
 import logging
 from datetime import date, timedelta
@@ -118,15 +111,10 @@ def roster_stations(cfg: dict) -> list[str]:
 
 
 def create_snotel_roster(conn: duckdb.DuckDBPyConnection, sites: list[dict], cfg: dict) -> None:
-    """Write `snotel_roster`: the versioned set of sites the snow features use.
+    """Write the versioned station roster and configured basin weights.
 
-    A roster in the configuration names the sites and the basin weight of each basin.
-    The roster makes the features independent of which sites AWDB reports as active on
-    the day of the run, and of which sites an earlier run left in `snotel_sites`.
-
-    Without a configured roster the function falls back to the sites discovered today and
-    gives each basin the same weight. That fallback is not stable over time. Use it for a
-    first run or a test only.
+    Without a roster, use currently discovered sites and equal basin weights. That fallback
+    is not stable across runs and is intended only for setup or tests.
     """
     found = {site["station_triplet"]: site["basin"] for site in sites}
     configured = cfg.get("roster")
@@ -275,14 +263,10 @@ def fetch_reservoir_monthly(triplets: list[str], start: str) -> list[tuple[str, 
 def create_reservoir_roster(
     conn: duckdb.DuckDBPyConnection, sites: list[dict], cfg: dict
 ) -> list[str]:
-    """Write `reservoir_roster`: the versioned set of reservoirs the storage features use.
+    """Write the versioned reservoir roster and return station triplets to fetch.
 
-    Without a roster the storage columns sum whichever stations AWDB reports as active on the
-    day of the run, and whichever stations an earlier run left in `reservoir_sites`. The
-    station count in the local record moves from 1 to 21 to 19, so the sum is a different
-    physical quantity in every era and even between 2 runs. A roster fixes the set.
-
-    Returns the station triplets to fetch storage for.
+    Without a configured roster, the selected stations can change between runs; the
+    resulting historical sums are then not directly comparable.
     """
     found = {site["station_triplet"]: site["basin"] for site in sites}
     configured = cfg.get("roster")
@@ -450,42 +434,13 @@ def transform_covariates(
     basins: list[str],
     delivery_ratio: float = DEFAULT_DELIVERY_RATIO,
 ) -> None:
-    """Monthly, complete months only.
+    """Build issue-time covariates for complete calendar months.
 
-    Snowpack comes from the sites in `snotel_roster`. A site's month-end value is its last
-    valid value in the final `MONTH_END_WINDOW_DAYS` days of the month, so a site that
-    misses the last day still reports. Each variable takes its own last valid day and its
-    own count of reporting sites. The columns are mean SWE, mean water-year precipitation,
-    both also as percent of the site medians, and 8-inch soil moisture, per basin and
-    pooled. Every pooled column averages the basins under the roster's declared basin
-    weights.
-
-    Reservoir storage at month end is summed over the reporting stations per basin. That
-    roster grows with dam construction, so early sums are smaller for a physical reason.
-
-    The table also holds inflow and breach flow in kaf, north-arm mean elevation, the
-    south-minus-north head, and climate-division mean temperature and precipitation.
-
-    `salt_mass_mt` is the dissolved salt in the south arm, interpolated from the UGS brine
-    campaigns. `salinity_gl_lag1` divides it by the volume of the month before, because
-    salinity and elevation are 2 readings of the same state: salinity is salt mass over
-    volume, and elevation is a function of volume. A model that reads this month's salinity
-    to predict this month's elevation therefore predicts elevation partly from itself. Only
-    the lagged column is published for that reason.
-
-    KSLC daily weather rolls up to monthly means, with the precipitation summed. NCEI
-    publishes a day about 1 day later, so unlike the nClimDiv columns these describe the
-    cutoff month and are available at issue time. A balance model may read them for a month
-    that has happened. It must force a future month from a climatology instead.
-
-    The 3 inflow gauges are the terminal gauges of their basins. They do not measure the
-    whole delivery to the lake, because minor tributaries, groundwater and the wetland zone
-    lie below them. `inflow_kaf_lake` divides the gauged total by `delivery_ratio` to give an
-    estimate of the whole delivery. `inflow_kaf_total` keeps the gauged sum unchanged. NOAA
-    releases a climate month around the 8th of the next month, so the cutoff month has no
-    climate value at issue time. Therefore this table holds only the `_lag1` copies of the
-    climate columns. The unlagged values stay in `climdiv_monthly`, where no model reads
-    them, so a model cannot use a value that does not exist at issue time."""
+    Snow features use the month's final valid value within 5 days and configured basin
+    weights. Flow volume requires at least 25 daily values, and the three-gauge total needs
+    every gauge. Climate-division and salinity features are lagged one month. Estimated
+    delivered inflow divides the gauged total by the stated `delivery_ratio`.
+    """
     inflow = discharge["inflow"]
     exchange = discharge.get("exchange", {})
     flow_cols = ",\n".join(

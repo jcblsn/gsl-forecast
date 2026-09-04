@@ -1,11 +1,8 @@
-"""Monthly climate-division temperature and precipitation from NOAA nClimDiv.
+"""Load monthly temperature and precipitation from NOAA nClimDiv.
 
-One fixed-width file per element covers every division since 1895. The file name carries
-the release date, so the directory listing is read to find the current one, and the table
-is replaced on every run since each release revises the last two years. Values for a month
-are released around the 8th of the following month, one week after the forecast runs, so
-the cutoff month is always missing at issue time: these columns serve the fit of the water
-balance, not the in-season regressors.
+Each run selects the newest fixed-width release and replaces the local table. Forecast
+features use only one-month-lagged values because the configured issue schedule precedes
+publication of the cutoff month's division values.
 """
 
 import logging

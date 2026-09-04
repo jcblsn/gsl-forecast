@@ -1,49 +1,166 @@
 ---
-title: Model specification
-description: What the forecast predicts, which inputs it uses, and how each model works.
+title: Method and evidence
+description: Target, inputs, model equations, uncertainty, evaluation, and reproducibility.
 ---
 
-## The data the models fit on
+This page specifies the current research prototype. It forecasts the calendar-month mean water-surface elevation of the Great Salt Lake’s south arm. The strongest development result is at short range: mean absolute error is 0.58 ft at lead 6, compared with 1.33 ft for persistence. At lead 24, the prototype is worse than persistence, 1.92 versus 1.79 ft.
 
-Each model fits on one row per calendar month. The table gives the last 12 rows, so a reader
-can see the shape and the units of the inputs. Section 2 gives the source and the release
-date of each column.
+The evaluation has been used repeatedly to develop the models. It is not independent test evidence, and the forecast is not an operational product.
 
-Snow water equivalent is the depth of water held in the snowpack. A water year runs from
-October 1 to September 30. `kaf` is thousand acre-feet, a volume of water.
+## Forecast target and schedule
+
+The target, `avg_elevation`, averages the available daily mean elevations within 1 calendar month. Data come from [USGS gauge 10010000](https://waterdata.usgs.gov/monitoring-location/USGS-10010000/) in Saltair Boat Harbor. The gauge represents the south arm. Values use feet above the National Geodetic Vertical Datum of 1929 (NGVD 29). They are elevations, not water depths.
+
+The cutoff is the last complete month of input data. The issue date is the first day of the next month. Lead 1 is that issue month, lead 2 is the following month, and lead 24 is 23 calendar months after the issue date. The current partial month never enters a fit.
+
+The software derives 2 decision summaries from the predicted monthly path. It does not fit these summaries directly.
+
+| Summary | Definition | Issue months evaluated |
+| --- | --- | --- |
+| Maximum April–June monthly mean | The largest of the April, May, and June monthly means; not a daily peak | January–May |
+| September monthly mean | The final month of the water year; not necessarily the annual minimum | January–August |
+
+A water year runs from October 1 through September 30. The public target is not north-arm elevation, lake area, storage volume, salinity, or the daily seasonal peak.
+
+Observations before October 1989 often summarize sparse readings rather than near-daily data. The default fit begins in October 1989. Earlier observations remain available for explicit sensitivity analyses.
+
+## Inputs and availability
+
+Each model fits a monthly table. The following display shows the final 12 rows included with the published issue. Snow water equivalent (SWE) is the depth of liquid water stored in the snowpack. `kaf` means 1,000 acre-feet, a unit of volume.
 
 ```{ojs}
 //| echo: false
 inputs = FileAttachment("data/latest.json").json().then(d => d.inputs ?? {columns: [], rows: []})
 labels = ({
   month: "Month",
-  avg_elevation: "Elevation (ft)",
+  avg_elevation: "Elevation (ft NGVD 29)",
   swe_eom_gsl: "Snow water equivalent (in)",
   prec_wy_eom_gsl: "Water-year precipitation (in)",
   head_diff_ft: "South arm minus north arm (ft)",
-  inflow_kaf_total: "River inflow (kaf)"
+  inflow_kaf_total: "Gauged river inflow (kaf)"
 })
 inputTable = inputs.rows.length ? Inputs.table(inputs.rows, {
   columns: inputs.columns,
   header: Object.fromEntries(inputs.columns.map(c => [c, labels[c] ?? c])),
   format: Object.fromEntries(inputs.columns.filter(c => c !== "month").map(c => [c, v => Number.isFinite(v) ? v.toFixed(2) : "—"])),
   rows: 12
-}) : html`<p class="empty-state compact">The sample appears with the first complete issue.</p>`
+}) : html`<p class="empty-state compact">The input sample appears after a complete issue.</p>`
 ```
 
-{{< include ../docs/model-spec.md >}}
+The headline model uses 4 measurements from 2 primary systems.
 
-## Public record
+| Input | Unit | Source | Role |
+| --- | --- | --- | --- |
+| South-arm monthly mean | ft NGVD 29 | USGS 10010000 | Target and current lake state |
+| Month-end SWE | in | NRCS SNOTEL | Water stored in mountain snowpack |
+| Water-year precipitation | in | NRCS SNOTEL | Accumulated rain and snow since October 1 |
+| South-minus-north elevation | ft | USGS 10010000 and 10010100 | Current difference across the causeway |
 
-The project keeps every experimental forecast it has issued. Dated forecast files and their
-sidecars are write-once, so a reader can compare them against the gauge later.
+The [configuration](https://github.com/jcblsn/gsl-forecast/blob/main/config/config.json) fixes a 29-station SNOTEL roster. It has 10 sites in the Bear basin, 9 in the Weber basin, and 10 in the Provo–Jordan basin. For each variable, a station’s month-end value is its latest valid value in the final 5 days. Basin means use fixed weights of 0.588, 0.163, and 0.249. This prevents the index from changing when the API’s active-site list changes.
 
-Each forecast stores its numbers, its interval, the weights the model fitted, the range of
-dates it was fitted on, the state of the data on the issue date, and the contribution of
-each input. Required metadata also records the issue status, forecast version, code commit,
-dirty-tree state and evaluation-policy version. Verification rejects missing or malformed
-metadata and keeps results separate by issue status, forecast version, model and lead.
+Alternative and experimental models also ingest tributary discharge, causeway flow, and reservoir storage. Other inputs include Salt Lake City airport weather, NOAA climate-division data, and Utah Geological Survey brine chemistry. These inputs do not enter the current headline model. Climate-division values and reconstructed salinity are lagged by 1 month. Their same-month values are unavailable at issue time or contain information about the target.
 
-- [Dated forecasts](https://github.com/jcblsn/gsl-forecast/tree/main/forecasts)
-- [Model source](https://github.com/jcblsn/gsl-forecast/tree/main/src/forecasting)
-- [USGS gauge 10010000](https://waterdata.usgs.gov/monitoring-location/10010000/)
+USGS values can be provisional and later revised. The pipeline refetches the latest 45 days. It retains observation counts, approval status, discharge coverage, and other quality fields. A forecast normally fails when the target is stale or the final month is too sparse. It also fails when a required covariate is missing or an inflow gauge lacks full daily coverage.
+
+## Headline model
+
+The headline model, `blend`, combines a direct covariate regression with a time-series model that uses only past lake elevation.
+
+### Direct covariate regression
+
+Let `t` be the cutoff month, `h` the lead, and `y` the monthly mean elevation. For each cutoff calendar month and lead, `swe_head` fits past years from the same calendar month:
+
+$$
+y_{i+h}-y_i = \beta_0 + \beta_y y_i + \beta_s S_i + \beta_p P_i + \beta_d D_i + \epsilon_{i,h}.
+$$
+
+Here `S` is month-end SWE, `P` is water-year precipitation, and `D` is south-arm elevation minus north-arm elevation. The forecast adds the fitted change to the current elevation.
+
+The estimator uses [ridge regression](https://doi.org/10.1080/00401706.1970.10488634), which is least squares with coefficient shrinkage. It standardizes the predictors and selects the penalty by [generalized cross-validation](https://doi.org/10.1080/00401706.1979.10489751) within the training rows. Each fit has about 1 row per year and estimates as many as 5 coefficients, including the intercept. This small effective sample is an important source of instability.
+
+The model drops a predictor when its cutoff value is missing, fewer than 10 training rows contain it, or its within-fit variation is negligible. If fewer than 10 rows contain all remaining predictors, the fit falls back to current elevation alone. Each lead is fitted independently, so the predicted path has no smoothness or physical-conservation constraint.
+
+The contribution chart on the forecast page centers each input on its training mean and multiplies the difference by the fitted coefficient. These terms add to the point forecast. They are not causal effects because the inputs covary and the model is observational.
+
+### Elevation-only component and blend
+
+The second component, `ets_damped_s12`, is an [exponential-smoothing model](https://doi.org/10.1016/S0169-2070(01)00110-8) with an additive 12-month seasonal pattern and a damped trend. The blend is
+
+$$
+\widehat y_h = w_{s,h}\widehat y_h^{\text{SWE}}
+             + (1-w_{s,h})\widehat y_h^{\text{ETS}},
+$$
+
+where `s` is the issue season. The seasons are November–March for snow accumulation, April–June for snowmelt, and July–October for summer recession.
+
+A nested walk-forward procedure selects each weight on a 0.01 grid to minimize total absolute error. The covariate-model weight cannot increase with lead. Each season and lead needs at least 20 usable inner cutoffs. Otherwise the model uses a fixed fallback curve, and the export code refuses to publish it as a complete headline issue.
+
+The repository retains simpler models as checks. `naive_last` repeats the current monthly mean. `endpoint_seasonal` adds the historical median change for the same cutoff month and lead to a 3-day median month-end elevation. `inflow_chain` predicts tributary inflow from snowpack and then rolls elevation forward with an empirical recursion. It is not a storage balance.
+
+The structural state-space and storage-balance models are experimental and excluded from the headline release. The storage balance is useful for diagnosing unmeasured flux, but its residual combines causeway exchange, ungauged water, measurement error, and evaporation error. It does not isolate any of those processes. The [model registry](https://github.com/jcblsn/gsl-forecast/blob/main/src/forecasting/registry.py) is the authoritative list of evaluated and exported models.
+
+## Forecast intervals
+
+Published intervals are calibrated from retrospective point-forecast errors. The interval layer estimates 5 quantiles: the 5th, 25th, 50th, 75th, and 95th percentiles. A quantile is a threshold below which a stated fraction of the calibration errors falls.
+
+For each model and lead, the method calculates `actual - forecast` in walk-forward evaluation. It estimates a separate error center and scale for each issue season. Both shrink toward the pooled values by `n / (n + 10)`. The standardized tail shape uses errors from all seasons. Each season-by-lead cell contains only about 13–22 errors, so the method does not estimate a separate 5th percentile from each small cell.
+
+The central 90% interval is the 5th-to-95th-percentile band. It is marginal: each lead has a separate interval. It does not assign a 90% probability to the complete 24-month path, the spring maximum, or the date of a minimum. The point forecast is fitted separately and need not equal the calibrated median.
+
+Evaluation leaves 1 cutoff year out when it calibrates intervals for that year. Adjacent years can still share target months at long leads, which makes long-range interval scores optimistic. The software reports coverage and the weighted interval score described by [Bracher and colleagues (2021)](https://doi.org/10.1371/journal.pcbi.1008618).
+
+## Evaluation and findings
+
+The versioned evaluation policy defines 3 distinct evidence groups.
+
+| Group | Dates | Use |
+| --- | --- | --- |
+| Development | 157 monthly cutoffs, 2011-08 through 2024-08 | Open and repeatedly used for model development |
+| Limited confirmation | 2024-09 through 2025-08, maximum lead 12 | Sealed until a candidate and acceptance rule are fixed |
+| Prospective | Monthly issues beginning 2026-09 | Immutable records, kept separate by forecast version |
+
+The frozen development summary gives the following aggregate results.
+
+| Lead | Headline MAE (ft) | Persistence MAE (ft) | Central 90% coverage |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.13 | 0.34 | 88% |
+| 6 | 0.58 | 1.33 | 87% |
+| 12 | 1.08 | 1.28 | 87% |
+| 24 | 1.92 | 1.79 | 87% |
+
+The largest relative error reductions occur through 6 months. At lead 24, the paired MAE improvement is -0.13 ft with a descriptive 95% block-bootstrap interval of -0.46 to 0.20 ft. This does not support a claim of 24-month skill over persistence.
+
+The uncertainty is larger than 157 cutoffs suggest. Consecutive 24-month forecasts share 23 target months, so the evaluation contains about 13 years. A [circular moving-block bootstrap](https://doi.org/10.1214/aos/1176347265) uses 24-month blocks to preserve some of this dependence. The reported interval uses 5,000 resamples and random seed 0. It is a sensitivity analysis, not a proof that the data-generating process is stationary.
+
+Several questions remain open. The current data do not establish that `blend` is better than simpler candidates. Historical evaluation uses revised data, not exact issue-time vintages. The long-range models lack forecasts of future runoff, weather, diversions, and causeway operations. Prospective records are not yet long enough to estimate accuracy.
+
+## Reproduction and record
+
+The repository README gives the complete commands. The main implementation links are:
+
+| Stage | Code or artifact |
+| --- | --- |
+| Ingest and monthly transformation | [`src/pipeline`](https://github.com/jcblsn/gsl-forecast/tree/main/src/pipeline) |
+| Model input join | [`src/forecasting/data.py`](https://github.com/jcblsn/gsl-forecast/blob/main/src/forecasting/data.py) |
+| Headline components and weights | [`src/forecasting/multivariate`](https://github.com/jcblsn/gsl-forecast/tree/main/src/forecasting/multivariate) |
+| Interval calibration | [`src/forecasting/quantiles.py`](https://github.com/jcblsn/gsl-forecast/blob/main/src/forecasting/quantiles.py) |
+| Walk-forward evaluation | [`src/forecasting/cross_validate.py`](https://github.com/jcblsn/gsl-forecast/blob/main/src/forecasting/cross_validate.py) |
+| Dated export and provenance | [`src/forecasting/run_forecast.py`](https://github.com/jcblsn/gsl-forecast/blob/main/src/forecasting/run_forecast.py) |
+| Frozen summary | [`data/results`](https://github.com/jcblsn/gsl-forecast/tree/main/data/results) |
+
+Primary source documentation is available from:
+
+- [USGS Water Data for the Nation](https://waterdata.usgs.gov/monitoring-location/USGS-10010000/)
+- [NRCS Air and Water Database API](https://wcc.sc.egov.usda.gov/awdbRestApi/swagger-ui/index.html)
+- [USGS elevation-area-volume release](https://doi.org/10.5066/P9DGG75W)
+- [NOAA daily summaries](https://www.ncei.noaa.gov/support/access-data-service-api-user-documentation)
+- [NOAA nClimDiv](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.ncdc%3AC00005%3Bview%3Diso)
+- [Utah Geological Survey brine database](https://geology.utah.gov/popular/great-salt-lake/)
+
+Every dated issue has a CSV and metadata sidecar. A complete headline issue also has an explanation sidecar. Export paths are write-once. Current metadata records the issue status, forecast version, code state, configuration hash, modeling-table hash, data support, and interval calibration. The first archived issue can predate some current provenance fields.
+
+- [Dated forecast files](https://github.com/jcblsn/gsl-forecast/tree/main/forecasts)
+- [Current configuration](https://github.com/jcblsn/gsl-forecast/blob/main/config/config.json)
+- [Frozen result manifest](https://github.com/jcblsn/gsl-forecast/blob/main/data/results/manifest.json)
+
+The frozen summary is content-addressed, but its experiment record reports a dirty source worktree. It also omits row-level predictions. The snapshot preserves the published development numbers; the recorded commit alone cannot reproduce the exact run.

@@ -1,10 +1,8 @@
-"""South-arm elevation-area-volume lookups from the USGS 2023 topobathymetric tables
-(Root, 2023, https://doi.org/10.5066/P9DGG75W), thinned to 0.1 ft steps. Elevations are
-NGVD29 feet to match the Saltair gauge.
+"""Interpolate USGS south-arm area and volume at 0.1-ft elevation steps.
 
-`np.interp` returns the end value for an input outside the table and gives no warning. A
-storage model that drifts out of the table would then step on a constant area and look
-stable while it is wrong. Each lookup therefore checks its input first.
+The source is Root (2023), https://doi.org/10.5066/P9DGG75W. Elevations use ft NGVD 29.
+Lookups reject values outside the published table by default because `numpy.interp` would
+otherwise clamp them silently.
 """
 
 import os
@@ -27,7 +25,7 @@ def table() -> pd.DataFrame:
 
 
 def elevation_domain() -> tuple[float, float]:
-    """The lowest and highest elevation the table covers, in ft NGVD29."""
+    """Return the table's minimum and maximum elevation in ft NGVD 29."""
     t = table()
     return float(t["elev_ft_ngvd29"].iloc[0]), float(t["elev_ft_ngvd29"].iloc[-1])
 

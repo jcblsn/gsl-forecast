@@ -31,9 +31,9 @@ def plot_cv_mae(summary: pd.DataFrame, output_path: str, subtitle: str) -> str:
         + geom_point(size=1.5)
         + scale_x_continuous(breaks=list(range(1, horizon + 1)))
         + labs(
-            title="Walk-forward cross-validation: mean absolute error by horizon",
+            title="Walk-forward cross-validation: mean absolute error by lead",
             subtitle=subtitle,
-            x="Forecast horizon (months)",
+            x="Lead (monthly steps after cutoff)",
             y="Mean absolute error (ft)",
             color="Model",
         )
@@ -52,9 +52,9 @@ def plot_cv_ratio(summary: pd.DataFrame, output_path: str, subtitle: str) -> str
         + geom_point(size=1.5)
         + scale_x_continuous(breaks=list(range(1, horizon + 1)))
         + labs(
-            title="MAE relative to naive_last (below 1 beats the baseline)",
+            title="MAE relative to persistence (values below 1 are lower)",
             subtitle=subtitle,
-            x="Forecast horizon (months)",
+            x="Lead (monthly steps after cutoff)",
             y="MAE / MAE(naive_last)",
             color="Model",
         )

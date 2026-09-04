@@ -1,21 +1,9 @@
-"""South-arm brine chemistry from the Utah Geological Survey.
+"""Build an experimental south-arm salt-mass series from UGS brine samples.
 
-UGS has sampled Great Salt Lake brine since 1966 and publishes the whole record as one
-workbook with a sheet per site. Site AS2 is the open-water Gilbert Bay site that Utah's own
-lake summary plots, and it is the only site on the south transect that carries a computed
-salinity for the full record.
-
-Sampling is 1 to 4 boat campaigns per year, so this is not a monthly series and it cannot
-resolve a seasonal cycle. It resolves what it is used for here: the dissolved salt mass,
-which moves over years, not months.
-
-Salt mass is not conserved. Mineral extraction removes salt and the causeway exports it to
-the north arm. Estimated from this record it falls from about 1685 Mt in 1993 to about 863
-Mt in 2025. A model that holds salt mass constant therefore gets the recent lake wrong.
-
-The estimate multiplies an upper-brine salinity by the whole south-arm volume. When a deep
-brine layer is present the true mass is higher, so the level carries a low bias. The
-trajectory is the part this project uses, and the level is reported so a reader can see it.
+The estimate averages samples no deeper than 15 ft at site AS2 and multiplies that salinity
+by USGS-derived south-arm volume. Sparse sampling cannot resolve monthly variation. The
+upper-layer approximation also omits any deeper brine layer and can underestimate total
+salt mass.
 """
 
 import logging
@@ -106,18 +94,11 @@ def salt_mass_series(campaigns: pd.DataFrame, elevations: pd.DataFrame) -> pd.Da
 
 
 def monthly_salt_mass(salt: pd.DataFrame, months: pd.DatetimeIndex) -> pd.DataFrame:
-    """Interpolate the campaign salt mass onto months, and say how old each value is.
+    """Interpolate campaign estimates to month starts and record carry-forward age.
 
-    Interpolating between 2 campaigns a year would invent a seasonal cycle in a salinity,
-    which the sampling cannot support. It does not invent one in a salt mass, because salt
-    mass has no seasonal cycle to invent: it moves with extraction and causeway export.
-    Salinity is therefore recovered later, from this mass and the volume of the month.
-
-    After the last campaign the value is carried forward, because the forecast runs every
-    month and a campaign can be 6 months old at issue time. A carried value is an assumption
-    that the mass has not moved, so `salt_mass_age_days` reports how long it has been
-    carried and a reader can judge it. Before the first campaign there is nothing to carry
-    and the value stays null.
+    Linear interpolation supplies values between campaigns. The last estimate is carried
+    forward, while months before the first campaign remain null. These values are modeling
+    assumptions, not monthly observations.
     """
     empty = pd.DataFrame({"month": months, "salt_mass_mt": np.nan, "salt_mass_age_days": np.nan})
     if salt.empty:
@@ -141,11 +122,7 @@ def monthly_salt_mass(salt: pd.DataFrame, months: pd.DatetimeIndex) -> pd.DataFr
 
 
 def fetch_workbook(cache_path: str | None) -> bytes:
-    """The workbook bytes, from the cache when the published file has not changed.
-
-    UGS revises this file about twice a year and it is 4 MB. A conditional request keeps the
-    monthly pipeline run from downloading it again for nothing.
-    """
+    """Return workbook bytes, using a conditional request when a cache exists."""
     if not cache_path or not os.path.exists(cache_path):
         content = get_with_retry(UGS_WORKBOOK, timeout=300).content
     else:
@@ -204,12 +181,7 @@ def build_salt_mass(conn: duckdb.DuckDBPyConnection, cfg: dict, elevation_table:
 
 
 def materialize_hypsometry(conn: duckdb.DuckDBPyConnection) -> None:
-    """Put the elevation-area-volume table in the database.
-
-    A salinity is a salt mass over a volume, and the volume comes from this table. Keeping
-    a copy in the database lets the monthly rollup do the lookup in SQL. The table steps by
-    0.1 ft, so a join on the rounded elevation is accurate to 0.05 ft.
-    """
+    """Copy the 0.1-ft elevation-area-volume table into DuckDB for SQL joins."""
     frame = hypsometry.table()
     conn.register("_hyps", frame)
     conn.execute("""

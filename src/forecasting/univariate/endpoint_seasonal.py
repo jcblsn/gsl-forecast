@@ -19,12 +19,8 @@ ENDPOINT_CANDIDATES = (
 class EndpointSeasonalForecaster(Forecaster):
     """Latest endpoint plus the historical median change for the issue month and lead.
 
-    With `n_analogs` the median is taken over the `n_analogs` past origins whose own level
-    was closest to the level now, instead of over every past origin in the same calendar
-    month. The change from a 4,190 ft origin is not the change from a 4,200 ft origin: the
-    surface area differs, so the same volume moves the level by a different amount, and the
-    lake reverts toward its own long-run level. This is the level-conditioned seasonal-change
-    climatology, which is a stronger baseline than a repeat of the last value.
+    With `n_analogs`, the calculation uses the nearest past origin elevations. Without it,
+    the calculation uses all past origins in the same calendar month.
     """
 
     def __init__(
@@ -134,7 +130,7 @@ class EndpointSeasonalForecaster(Forecaster):
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
         if h < 1:
-            raise ValueError("Forecast horizon must be positive")
+            raise ValueError("Forecast length must be positive")
         origin = pd.Timestamp(start_date or self.last_date)
         return pd.DataFrame(
             {

@@ -12,12 +12,13 @@ from ..base import Forecaster
 class ThetaForecaster(Forecaster):
     """Standard theta method (Assimakopoulos & Nikolopoulos 2000; Hyndman & Billah 2003).
 
-    Equivalent to SES with drift equal to half the OLS trend slope:
+    It is equivalent to simple exponential smoothing (SES) with drift equal to half the
+    ordinary least-squares trend slope:
+
         y_hat(h) = SES(h) + (b / 2) * (h - 1 + 1/alpha)
-    The SES component anchors the forecast at the current level; the drift term
-    carries half the long-run slope. Averaging SES with the raw OLS line (a common
-    mis-reading of the method) would instead anchor the forecast at the regression
-    line, which can sit far from the current level on a non-stationary series.
+
+    This form anchors the forecast at the smoothed current level rather than at the fitted
+    regression line.
     """
 
     def __init__(self, time_col: str = "month", target_col: str = "avg_elevation"):

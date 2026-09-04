@@ -55,13 +55,10 @@ SITE_PROVENANCE_FIELDS = (
 
 
 def table_fingerprint(df: pd.DataFrame) -> dict:
-    """A content address for the table the models read.
+    """Return a content address for the complete modeling table.
 
-    A maximum date says when the data stops. It does not say what the values were. USGS
-    revises provisional elevation and discharge, and NRCS revises SNOTEL, so 2 runs with the
-    same `data_max` can read different numbers. The digest covers every value in the table,
-    so a later reader can tell whether the table it holds is the table this issue used. The
-    column list travels with it, because a schema change also changes what was knowable.
+    The digest distinguishes data revisions and schema changes that share the same maximum
+    date. CSV serialization rounds floats to six significant digits before hashing.
     """
     ordered = df.sort_values("month").reset_index(drop=True)
     payload = ordered.to_csv(index=False, float_format="%.6g").encode()
@@ -241,7 +238,7 @@ def run_forecasts(
     forecasters: list[Forecaster] | None = None,
     headline_enabled: bool = True,
 ) -> pd.DataFrame:
-    """Fit each production model on all history from train_start and store h-step forecasts."""
+    """Fit each configured issue model from `train_start` and store forecasts by lead."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     config = load_config(config_path)
@@ -303,12 +300,10 @@ def run_forecasts(
 def headline_or_none(
     model: Forecaster | None, horizon: int
 ) -> tuple[Forecaster | None, dict | None]:
-    """The headline model and its calibration, or 2 None values when the model refuses.
+    """Return the headline model and calibration, or two null values after refusal.
 
-    Warning: the refusal covers the headline number, not the issue. The model paths still go
-    out, and `export_site_data` keeps the last complete bundle on the public page. A refusal
-    that stopped the run left no forecast for that month, and the workflow retry took the
-    same path and stopped again.
+    Other model paths still export. The public site retains its last complete headline and
+    reports the current issue's failure in the status file.
     """
     if model is None:
         return None, None
@@ -320,10 +315,10 @@ def headline_or_none(
 
 
 def headline_calibration(model: Forecaster, horizon: int) -> dict:
-    """The calibration details behind one issue.
+    """Return calibration metadata for one issue.
 
-    Warning: a blend that finds too few walk-forward cutoffs holds a fixed ramp. The ramp is
-    a placeholder, not a fitted result, so this function refuses to publish it.
+    A blend with too few walk-forward cutoffs uses an unfitted fallback ramp. This function
+    refuses to publish that ramp as the headline result.
     """
     if not isinstance(model, BlendForecaster):
         return {"model": model.name, "metrics": model.get_metrics()}
@@ -359,10 +354,9 @@ def headline_calibration(model: Forecaster, horizon: int) -> dict:
 
 
 def latest_cv_parquet(experiment_db: str) -> str:
-    """The per-cutoff file of the newest cross-validation run, from the tracker.
+    """Return the newest tracked cross-validation file.
 
-    Selection by modification time can pick up a file from an earlier run, and a model
-    missing from it has no interval. The run records the file it wrote, so ask the run.
+    Tracker order is used because modification time can select an unrelated earlier run.
     """
     with ExperimentTracker(experiment_db) as tracker:
         for experiment in tracker.experiments():
@@ -373,11 +367,10 @@ def latest_cv_parquet(experiment_db: str) -> str:
 
 
 def require_intervals(out: pd.DataFrame, cv_parquet: str) -> None:
-    """Stop the export when a model has no interval.
+    """Stop export when any model lacks a complete interval.
 
-    Warning: `apply_intervals` gives NaN for a model that the cross-validation file does not
-    hold, and it raises nothing. The forecast is a range, not one number, so a missing
-    interval is not publishable. Re-run `gsl-cv` and pass the file it writes.
+    `apply_intervals` otherwise returns null quantiles when the calibration file lacks a
+    model, without raising an exception.
     """
     quantile_cols = [c for c in out.columns if c.startswith("q") and c[1:].isdigit()]
     if not quantile_cols:
@@ -550,10 +543,9 @@ def export_site_data(
     meta: dict,
     explanation: dict | None,
 ) -> None:
-    """Write the site status on each run, and the headline after a complete issue.
+    """Write status on every run and replace the site bundle only after a complete issue.
 
-    Warning: an incomplete run must not replace the published headline. Such a run writes
-    the status file, which gives the reason, and keeps the last complete bundle.
+    An incomplete run records the reason while retaining the last complete headline.
     """
     status = {
         "attempted_issue": str(exported["issue"].iloc[0]),
@@ -606,9 +598,11 @@ def input_sample(observed: pd.DataFrame) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run GSL water level forecasts")
+    parser = argparse.ArgumentParser(
+        description="Fit Great Salt Lake south-arm monthly elevation forecasts"
+    )
     parser.add_argument("--config", help="Path to config file")
-    parser.add_argument("--horizon", type=int, help="Forecast horizon in months")
+    parser.add_argument("--horizon", type=int, help="Monthly steps after the data cutoff")
     parser.add_argument("--experiment-db", help="Path to experiment database")
     parser.add_argument("--train-start", help="Earliest training date, e.g. 1989-10-01")
     parser.add_argument(

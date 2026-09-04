@@ -1,28 +1,9 @@
-"""The prototype headline model. It mixes component models with fitted weights.
+"""Blend covariate and elevation-only forecasts with fitted weights.
 
-Snowpack controls the lake level for the next 6 to 12 months. It gives no information about
-the winter after next. Therefore the best model changes with the forecast lead.
-
-The model puts a weight on each component. The weights sum to 1 at every lead. The last
-component is the anchor, `ets_damped_s12`, which uses the lake record alone. The weight on
-everything except the anchor is the covariate share, and that share must not increase with
-the lead. Inside the share the mix is free, so a component that is strong at short leads and
-a component that is strong at long leads can trade places as the lead grows.
-
-The model fits the weights for each lead and for each issue season.
-
-The issue season is necessary. A lead of 6 months from a February issue gives the spring
-peak, which the current snowpack controls. The same lead from an August issue gives a month
-in the next accumulation season, which the current snowpack does not control.
-
-The model fits the weight curves with a walk-forward pass in the training data. The search
-finds the curve with the lowest total absolute error under the condition above. It does not
-fit each lead separately and then correct the result.
-
-The inner pass uses the same 15-year window as the harness. A longer window gives less noise
-in the weights, but it gives a biased result. Before approximately 1995 the SNOTEL record is
-too short to fit the snowpack model. The inner pass then records a failure that cannot occur
-now, and gives the snowpack model approximately half of the correct weight.
+Weights sum to 1 at each lead. The combined covariate share cannot increase with lead.
+A walk-forward pass selects the minimum-absolute-error path for each issue season. The final
+component is the elevation-only anchor. The fit uses the configured 15-year cutoff window;
+longer windows include early cutoffs with insufficient SNOTEL history.
 """
 
 from datetime import date
@@ -72,7 +53,7 @@ def covariate_share(grid: np.ndarray) -> np.ndarray:
 
 
 def default_weights(horizon: int, k: int = 2) -> np.ndarray:
-    """The fixed ramp. The model uses it when the training data gives too few cutoffs.
+    """Return the unfitted fallback ramp used when too few cutoffs are available.
 
     The share falls from 1 at lead 6 to 0 at lead 24, and the covariate components hold
     equal parts of it.
@@ -87,16 +68,11 @@ def default_weights(horizon: int, k: int = 2) -> np.ndarray:
 
 
 def monotone_weight_path(loss: np.ndarray, share: np.ndarray) -> np.ndarray:
-    """The grid point at each lead with the lowest total loss, under the share condition.
+    """Minimize total loss while preventing covariate share from increasing by lead.
 
     `loss[i, j]` is the total absolute error at lead i + 1 for grid point j, and `share[j]`
-    is the covariate share of that point. `share` must not increase with the lead. A dynamic
-    program finds the minimum over all leads under the condition, so the condition is part
-    of the objective and not a correction to a free fit.
-
-    Grid points with an equal share form one group. The program takes the best point of
-    every group at or above the current share. For an equal loss it selects the lower share,
-    and inside a group the earlier point.
+    is its covariate share. Dynamic programming evaluates the full constrained path. Ties
+    select the lower share and then the earlier point within an equal-share group.
     """
     n_leads, n_grid = loss.shape
     bounds = np.flatnonzero(np.diff(share) > 0) + 1
@@ -141,12 +117,10 @@ def _column_summary(train: pd.DataFrame, column: str) -> tuple:
 
 
 def _fingerprint(train: pd.DataFrame, columns: tuple[str, ...]) -> tuple:
-    """A summary of every column 1 component reads, including its covariates.
+    """Return a compact in-process cache key for every column a component reads.
 
-    The summary covered the target column alone. A component that reads snowpack could
-    therefore take a cached prediction from a frame whose snowpack differed, as long as the
-    elevation series matched. That cannot happen inside 1 walk, but it can across a pipeline
-    change in 1 process, and the cache is a module-level dictionary.
+    This statistical summary is not a collision-resistant content hash and must not be used
+    for persisted provenance.
     """
     return (len(train), tuple(_column_summary(train, c) for c in columns))
 
@@ -154,15 +128,7 @@ def _fingerprint(train: pd.DataFrame, columns: tuple[str, ...]) -> tuple:
 def _cached_prediction(
     label: str, factory, train: pd.DataFrame, horizon: int, columns: tuple[str, ...]
 ) -> np.ndarray:
-    """The prediction of one component at one inner cutoff, kept in a cache.
-
-    Cross-validation calls `fit` one time for each outer cutoff. Two adjacent outer cutoffs
-    share almost all of their inner cutoffs. A prediction at an inner cutoff uses only the
-    rows on or before that cutoff. Therefore the cached value is always correct.
-
-    The label identifies the component, and it carries the component's settings, so 2
-    components with the same name and different features cannot share an entry.
-    """
+    """Reuse a component prediction when its settings, cutoff, inputs, and lead match."""
     key = (label, train[TIME_COL].iloc[-1], horizon, _fingerprint(train, columns))
     hit = _CACHE.get(key)
     if hit is None:
@@ -325,13 +291,11 @@ class BlendForecaster(Forecaster):
         )
 
     def contributions(self, h: int) -> pd.DataFrame:
-        """The terms that add to the blended point forecast.
+        """Return terms that sum algebraically to the blended point forecast.
 
-        The model multiplies the terms of each component by that component's weight, and it
-        adds the terms that name the same input. A component with no `contributions` method
-        gives no term for an input, so its whole weighted forecast joins the reference path.
-        The anchor is always such a component. The reference path is thus the part of the
-        forecast that no named input changes, and the terms still add to the prediction.
+        Terms from each component are multiplied by its blend weight. Components without a
+        decomposition join the reference path. These terms describe model arithmetic, not
+        causal effects of the inputs.
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before explanation")

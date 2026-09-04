@@ -136,7 +136,7 @@ def evaluate_at_cutoff(
 
 
 def summarize(cv_df: pd.DataFrame, baseline: str = BASELINE) -> pd.DataFrame:
-    """Per model and horizon: MAE, RMSE, and MAE relative to the baseline model."""
+    """Per model and lead: MAE, RMSE, and MAE relative to persistence."""
     summary = (
         cv_df.groupby(["model", "h"])
         .agg(mae=("abs_error", "mean"), rmse=("sq_error", lambda x: x.mean() ** 0.5))
@@ -236,14 +236,14 @@ def print_season_coverage(by_season: pd.DataFrame, model: str, leads=(1, 3, 6, 1
 def print_summary(summary: pd.DataFrame, horizon: int) -> None:
     pivot = summary.pivot(index="model", columns="h", values="mae").round(3)
     pivot.columns = [f"h={c}" for c in pivot.columns]
-    print("\nMean absolute error (ft) by model and horizon:")
+    print("\nMean absolute error (ft) by model and lead:")
     print(pivot.to_string())
     if "mean_pinball_loss" in summary.columns:
         loss = summary.pivot(index="model", columns="h", values="wis").round(3)
         loss.columns = [f"h={c}" for c in loss.columns]
-        print("\nWeighted interval score (ft) by model and horizon:")
+        print("\nWeighted interval score (ft) by model and lead:")
         print(loss.to_string())
-    print("\nBest model at each horizon (MAE ratio to naive_last in parentheses):")
+    print("\nLowest-MAE model at each lead (ratio to persistence in parentheses):")
     for h in range(1, horizon + 1):
         best = summary[summary["h"] == h].sort_values("mae").iloc[0]
         print(f"  h={h:2d}: {best['model']:<20} MAE={best['mae']:.3f} ({best['mae_ratio']:.2f})")
@@ -378,7 +378,9 @@ def run_cross_validation(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Walk-forward CV for GSL forecasters")
+    parser = argparse.ArgumentParser(
+        description="Evaluate Great Salt Lake forecasts with walk-forward cross-validation"
+    )
     parser.add_argument("--config", help="Path to config file")
     parser.add_argument(
         "--n-cutoffs",

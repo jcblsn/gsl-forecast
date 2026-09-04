@@ -1,9 +1,8 @@
-"""Direct multi-horizon regression of the lake's change on month-end snowpack.
+"""Direct multi-horizon regression of south-arm elevation change.
 
-This is the NRCS outlook generalised to every month and every lead: for a cutoff in calendar
-month m and lead h, the change in elevation over h months is regressed on the current
-elevation and the current basin snow water equivalent and water-year precipitation, using
-every past year's cutoff in the same calendar month. Only values known at the cutoff enter.
+For each cutoff month and lead, the fit uses past rows from the same calendar month. Default
+predictors are current elevation, month-end snow water equivalent, and water-year
+precipitation. Only values available at the cutoff enter the fit.
 """
 
 from datetime import date
@@ -88,12 +87,10 @@ class SweRegressionForecaster(Forecaster):
         return float(x @ fitted["beta"])
 
     def contributions(self, h: int) -> pd.DataFrame:
-        """The terms that add to the point forecast, with the training means as the origin.
+        """Decompose the point forecast around the training-feature means.
 
-        The reference path is the result of the fit for a cutoff with average inputs. Each
-        other term is the coefficient multiplied by the distance of that input from its
-        training mean. These terms are parts of the fitted model. They are not causal
-        effects.
+        Each term is a coefficient times the input's distance from its mean. The terms sum
+        to the fitted prediction but are not causal effects.
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before explanation")

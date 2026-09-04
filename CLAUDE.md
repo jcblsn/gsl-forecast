@@ -1,6 +1,6 @@
 # Repo-specific Claude Code Guidance
 
-Write all repo documentation (README, literature-review.md, operational-forecasts-survey.md, program.md, docstrings) and code comments in ASD-STE100 Simplified Technical English.
+Write public documentation, docstrings, and code comments in ASD-STE100 Simplified Technical English.
 
 - Write one topic per sentence.
 - Keep procedure sentences to 20 words or fewer, and description sentences to 25 words or fewer.
@@ -13,5 +13,6 @@ Write all repo documentation (README, literature-review.md, operational-forecast
 - Avoid slang, idiom, and hedging words.
 - Use articles ("the", "a") instead of dropped-article telegraphic style.
 - Write numbers as digits, not words.
+- Keep each prose paragraph on one line in `.md` and `.qmd` source. Do not hard-wrap prose.
 
 Update existing docs to STE opportunistically, when a file is edited for other reasons. Do not do bulk rewrites just to convert them.

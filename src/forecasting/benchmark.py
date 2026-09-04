@@ -23,15 +23,10 @@ def compare(
     model: str = MODEL,
     inflow: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Per issue date: NRCS implied peak and error, one named model's peak and error, and
-    when `inflow` is given the issued NRCS median inflow next to ours and the observed volume.
+    """Align NRCS outlooks and one fixed project model by issue date.
 
-    The model is fixed in advance rather than chosen per row so the comparison is not a
-    best-of-thirteen selection made after seeing the answer.
-
-    NRCS actuals are daily-reading peaks; ours are the peak of the monthly mean. Both errors
-    are reported against their own definition, and the NRCS implied peak is also scored
-    against the monthly-mean actual so the two are comparable in the last column.
+    NRCS errors use daily peaks; project errors use the maximum April-June monthly mean.
+    The final error column evaluates the NRCS estimate against the monthly-mean target.
     """
     nrcs = nrcs.copy()
     nrcs["issue_date"] = pd.to_datetime(nrcs["issue_date"])
@@ -137,7 +132,9 @@ def seasonal_inflow(data: pd.DataFrame, issued: pd.DataFrame, train_start: str |
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare refit spring-peak errors with NRCS")
+    parser = argparse.ArgumentParser(
+        description="Compare spring-maximum refits with published NRCS outlooks"
+    )
     parser.add_argument("--benchmark", default=BENCHMARK_CSV)
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--config")
@@ -152,7 +149,10 @@ def main() -> None:
         issued = issued_inflow(conn) if "nrcs_inflow_forecasts" in tables else pd.DataFrame()
     inflow = seasonal_inflow(data, issued, train_start) if not issued.empty else None
     headline = refit_at_issues(nrcs, data, train_start, args.model)
-    print(f"Refit {args.model} at each issue date; NRCS actuals are daily peaks, ours monthly")
+    print(
+        f"Refit {args.model} at each issue date. NRCS errors use daily peaks; "
+        "project errors use the maximum April–June monthly mean."
+    )
     pd.set_option("display.width", 200)
     print(compare(headline, nrcs, args.model, inflow).to_string(index=False))
 

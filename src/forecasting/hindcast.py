@@ -17,10 +17,8 @@ from src.forecasting.registry import all_forecasters
 
 DEFAULT_MODELS = ("blend", "swe_head", "ets_damped_s12", "naive_last")
 
-# One fixed colour for each model, so a chart that drops a series does not recolour the
-# others. The 6 values are the categorical palette subset that passes the all-pairs colour
-# separation checks; the excluded orange collides with the red under deuteranopia. A model
-# outside this table stops the run, because a shared colour makes 2 series look like 1.
+# Fixed colors keep a model's appearance stable when another series is absent. This palette
+# preserves pairwise separation under deuteranopia. Unknown models stop the run.
 COLORS = {
     "blend": "#e34948",
     "swe_head": "#008300",
@@ -30,8 +28,7 @@ COLORS = {
     "inflow_chain": "#1baf7a",
 }
 
-# A variant takes the colour of the closest comparison and its own line type. A family is
-# then 1 hue with 1 line type for each member, which needs no further colour separation.
+# Variants share their comparison model's color and use a different line type.
 VARIANT_OF = {
     "blend_swe": ("blend", "dashed"),
     "inflow_chain_area": ("inflow_chain", "dashed"),
@@ -42,11 +39,11 @@ VARIANT_OF = {
 
 
 def model_style(models: list[str]) -> tuple[dict, dict]:
-    """The colour and the line type for each model. Unknown models stop the run."""
+    """Return the color and line type for each model."""
     unknown = [m for m in models if m not in COLORS and m not in VARIANT_OF]
     if unknown:
         raise SystemExit(
-            f"No colour for {', '.join(unknown)}. The chart gives each model its own colour, "
+            f"No color for {', '.join(unknown)}. The chart gives each model its own color, "
             f"so add one to COLORS in {__name__}, or select from: "
             f"{', '.join(sorted(set(COLORS) | set(VARIANT_OF)))}"
         )
@@ -180,7 +177,7 @@ def plot(fc: pd.DataFrame, data: pd.DataFrame, cutoff: pd.Timestamp, path: str) 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Chart hindcasts from past cutoffs")
+    parser = argparse.ArgumentParser(description="Plot model hindcasts from past data cutoffs")
     parser.add_argument("cutoffs", nargs="+", help="Last month of data to use, YYYY-MM")
     parser.add_argument("--models", default=",".join(DEFAULT_MODELS))
     parser.add_argument("--horizon", type=int)

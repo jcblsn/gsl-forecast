@@ -1,11 +1,8 @@
-"""Inflow-driven elevation recursion: snowpack -> inflow -> elevation change.
+"""Predict inflow from snowpack, then roll elevation forward empirically.
 
-Stage one predicts each future month's tributary inflow (kaf) from the snowpack known at
-the cutoff, by calendar month and lead. Stage two is an empirical monthly recursion:
-the change in elevation from one month to the next as a function of that month's inflow and
-either the starting elevation or, with `level_term="area"`, lake area from the USGS
-hypsometry. It does not conserve storage or close all inflows and outflows. The elevation is
-rolled forward one month at a time.
+Stage 1 predicts monthly tributary inflow in kaf for each lead. Stage 2 regresses monthly
+elevation change on inflow and either the starting elevation or lake area. This model does
+not conserve storage or represent all inflows and outflows.
 """
 
 from datetime import date

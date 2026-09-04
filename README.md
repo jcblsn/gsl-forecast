@@ -1,581 +1,152 @@
-# GSL Forecast
+# Great Salt Lake monthly elevation forecast
 
-An experimental prototype for dated, year-round forecasts of Great Salt Lake water-surface
-elevation. This is not yet a quality release or a validated operational product.
+This repository produces dated, experimental forecasts of the Great Salt Lake’s south-arm water-surface elevation. The target is the calendar-month mean at [USGS gauge 10010000](https://waterdata.usgs.gov/monitoring-location/USGS-10010000/), reported in feet above the National Geodetic Vertical Datum of 1929 (NGVD 29). It is an elevation, not the lake’s depth.
 
-The retrospective development record has important limits. Target observations before 1990
-have materially different temporal support. The displayed band is a nominal central 90%
-interval calibrated from retrospective errors, at 1 lead at a time and for the season the
-issue falls in; observed coverage is about 85–90% at the reported key leads. The published line is the model's
-point forecast and is not necessarily the interval median. There is no demonstrated advantage
-over persistence at 12–24 months; at lead 24 the published `blend` is worse than persistence.
+The project tests whether the current lake state, mountain snowpack, and recent precipitation improve short-range forecasts over persistence, which repeats the last observed value. The main development result is a large reduction in mean absolute error (MAE) through 6 months. At lead 6, MAE falls from 1.33 ft for persistence to 0.58 ft for the prototype headline model. At lead 24, the headline model is worse than persistence: 1.92 versus 1.79 ft.
 
-## Goal
+This is a research prototype, not a validated operational forecast. The evidence comes from a repeatedly used development period, not an independent test. Do not use it as the sole basis for water management, infrastructure, navigation, or public-health decisions.
 
-Develop and evaluate a live forecast of the water surface elevation of the Great Salt Lake
-south arm. A railway causeway divides the lake into a north arm and a south arm. The south arm
-holds the cities, the industry and almost all of the inflow, so it is the arm that decisions are
-about. The gauge is USGS 10010000 at Saltair, run by the United States Geological Survey.
-Elevation is in feet above sea level, and each value is the mean over the days of one calendar
-month.
+[View the experimental forecast](https://jcblsn.github.io/gsl-forecast/) or read the [current method specification](site/methodology.qmd).
 
-The prototype runs every month of the year and covers the next 24 months. It gives a range,
-not one number. Every experimental issue carries the date and model version that produced it,
-and the project scores it against the gauge as observations arrive.
+## Current evidence
 
-The models use lake elevation, snowpack, streamflow and the difference between the north and
-south arms. The current inflow-based model is an empirical elevation recursion, not a closed
-physical water balance. Models that use the lake record alone provide comparisons.
+The frozen evaluation uses 157 monthly cutoffs from August 2011 through August 2024. Each fit uses observations from October 1989 through its cutoff and predicts the next 24 monthly means. Lead 1 is the first unobserved month, which is also the issue month. Lead 24 is 23 calendar months after the issue date.
 
-Two numbers carry most of the decision weight:
+| Lead | Headline MAE (ft) | Persistence MAE (ft) | MAE improvement (ft), 95% interval |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.13 | 0.34 | 0.21 [0.17, 0.25] |
+| 3 | 0.33 | 0.90 | 0.57 [0.45, 0.68] |
+| 6 | 0.58 | 1.33 | 0.75 [0.60, 0.90] |
+| 12 | 1.08 | 1.28 | 0.21 [0.07, 0.36] |
+| 18 | 1.56 | 1.91 | 0.35 [0.14, 0.55] |
+| 24 | 1.92 | 1.79 | -0.13 [-0.46, 0.20] |
 
-- Maximum April–June monthly mean
-- September mean (water-year end). A water year runs from October 1 to September 30;
-  September is its last month, but it is not necessarily the seasonal or annual minimum
+Improvement is persistence MAE minus headline MAE, so positive values favor the headline model. The intervals come from a paired circular moving-block bootstrap with 24-month blocks. They describe sensitivity to the evaluated sequence; they are not formal confidence intervals under a fully specified probability model.
 
-The first 6 months are the decision-relevant window where snowpack adds predictive information.
-Months 6 to 24 remain an experimental research horizon.
+### Results
 
-## Terms
+The prototype has its clearest advantage at leads 1–6. Its estimated improvement remains positive at leads 12 and 18, but absolute error grows to 1.08 and 1.56 ft. At lead 24, the interval includes equal performance and the point estimate favors persistence.
 
-The lake and its measurements:
+The headline model is not the best candidate at every lead. In the same development data, the snowpack model has lower MAE at leads 3–18. A seasonal endpoint baseline has MAE of 0.10 ft at lead 1 and 1.70 ft at lead 24. These comparisons informed model development, so they are not independent selection evidence.
 
-| Term | Meaning |
-|---|---|
-| North arm, south arm | A railway causeway divides the lake. The south arm receives almost all of the inflow, and it is the arm this project forecasts |
-| Head difference | The level of the south arm minus the level of the north arm. The state manages the gap in the causeway, so this number records that decision |
-| Water year | October 1 to September 30. The lake fills over the winter and falls over the summer, so this is the natural year for it |
-| SWE | Snow water equivalent: the depth of water held in the snowpack, in inches. It is the best early measure of how much water will reach the lake |
-| SNOTEL | The NRCS network of automated snow measurement sites in the mountains around the lake |
-| NRCS | The Natural Resources Conservation Service, part of the United States Department of Agriculture. It runs SNOTEL and issues the only other dated forecast of the lake |
-| USGS | The United States Geological Survey. It runs the lake and river gauges |
-| kaf | Thousand acre-feet, the unit for a volume of water |
-| Hypsometry | The table that converts a lake elevation into a surface area and a volume |
+The nominal central 90% interval contains 87% of observations at leads 6 and 12 in aggregate. At lead 6, coverage ranges from 77% for April–June issues to 92% for July–October issues.
 
-The forecast and how it is scored:
+### Interpretation
 
-| Term | Meaning |
-|---|---|
-| Cutoff | The last month with data behind a forecast |
-| Issue date | The first day of the month after the cutoff, and the date on the forecast |
-| Lead (`h`) | The number of months from the issue date to the month being forecast |
-| Horizon | The longest lead the forecast covers, here 24 months |
-| Interval (q05-q95) | A nominal central 90% interval calibrated from retrospective errors at the same lead and in the same issue season. It is a band at 1 lead, not a sample from a trajectory |
-| Walk-forward cross-validation | Repeat the whole procedure at many past cutoffs, using only the data available at each one, then score the results |
-| MAE | Mean absolute error, in feet |
-| Mean pinball loss | The unweighted mean of pinball losses at q05, q25, q50, q75 and q95. Lower is better |
-| WIS | The weighted interval score, the recognized finite-quantile approximation to the continuous ranked probability score. For this symmetric quantile set it is exactly twice the mean pinball loss. Lower is better |
-| Coverage | The share of actual values inside the nominal central 90% interval |
-| Data vintage | The state of the input data on the issue date. Each issue records the SHA-256 of the whole modeling table, its column list, the SHA-256 of the resolved configuration and the SNOTEL roster version, because a maximum date says when the data stops and not what the values were |
-| Headline model | The model that supplies the public number, named in `config/config.json` |
-| Production models | The subset written to dated files each month, in `src/forecasting/registry.py` |
+The development record supports a practical claim that the current hydrologic state improves near-term monthly forecasts. It does not establish 24-month skill or show that the prototype blend is the best specification. The regression inputs are correlated, so their fitted contributions describe the model and do not identify causal effects.
 
-## Why
+### Limits
 
-The statistical specification of the models, and the date each input becomes available, are in `docs/model-spec.md`. A survey of existing forecasts is in `docs/operational-forecasts-survey.md` and the literature review in `docs/literature-review.md`. In short:
+- Adjacent forecasts share most target months. The 157 cutoffs represent about 13 water years, not 157 independent cases.
+- The development period has guided repeated model choices. A sealed confirmation period has not been opened, and prospective forecasts only begin in September 2026.
+- Historical evaluation uses the latest revised source data rather than the values available on each historical issue date.
+- Observations before October 1989 often have sparse temporal support. The default fit excludes them rather than treating them as modern daily records.
+- The interval is calibrated separately for each lead and issue season. It is not a joint distribution for the 24-month path, the spring maximum, or the date of a minimum.
+- The point forecast is fitted separately from the interval and need not equal its median.
+- Long leads use little information about future weather, runoff, diversions, or causeway operations. Structural change can invalidate relationships estimated from 1989 onward.
 
-- The only routine, dated product that targets lake elevation is the NRCS Utah Snow Survey's advisory rise-to-peak outlook, issued January through May since 2024. Its April-issue peak error was 0.1-0.4 ft in 2024-2026 against a stated band of about plus or minus half a foot. It stops in May, so nothing operational forecasts the September mean or anything beyond six months.
-- CBRFC issues ensemble streamflow forecasts for the tributaries (about 16-18% April error on April-July volume) but no lake product.
-- Long-range models (USU Climate Center's climate-oscillation regression, the Strike Team's 30-year Monte Carlo, the state's GSLIM planning model) are scenario tools or multi-year statistical forecasts with roughly 3 ft RMSE at 8 years, and none is verified as a dated forecast.
+The exact summary values are in [data/results/metrics.csv](data/results/metrics.csv). The [manifest](data/results/manifest.json) records the evaluation status, limitations, and file hashes.
 
-In season, the forecast to beat is the NRCS outlook. Out of season, the comparison is this
-project's own model that uses the lake record alone. From a winter cutoff that model does no
-better than a repeat of the last value (see [Frozen development results](#frozen-development-results)).
+## Forecast definition
 
-## Roadmap
+A railway causeway separates the lake’s north and south arms. Most surface inflow enters the south arm, and gauge 10010000 represents its water-surface elevation. The pipeline averages the available daily means within each complete calendar month. It excludes the current partial month.
 
-- [x] Univariate baselines with walk-forward CV and experiment tracking
-- [x] Survey of operational and gray-literature forecasts
-- [x] Score the maximum April–June monthly mean and September mean by issue month and place the first next to the NRCS record in `data/benchmarks/`
-- [x] Ingest covariates: SNOTEL basin snow water equivalent and precipitation, USGS inflow gauges (Bear 10126000, Weber 10141000, Jordan 10170490)
-- [x] Multivariate models: SWE regression (the NRCS method) and an inflow-driven elevation recursion
-- [x] Probabilistic output (q05-q95) from walk-forward errors, scored with mean pinball loss and coverage in CV
-- [x] Monthly GitHub Actions run that commits dated forecasts to `forecasts/`, plus `gsl-verify`, which scores them against the gauge as their target months arrive
-- [x] Feature store: percent-of-median snowpack, soil moisture, reservoir storage, north-arm level and breach flow, the issued NRCS inflow forecast (all from live APIs)
-- [x] Historical autoresearch pass for the multivariate models, recorded in `docs/autoresearch.log`; the active keep/revert loop is retired
-- [x] Bathymetry (USGS elevation-area-volume table) as `inflow_chain_area`; climate-division temperature and precipitation ingested
-- [x] One blended prototype headline model (`blend`), and an experimental page on GitHub Pages
-- [x] Close a water balance in storage: a state at the end of the month, evaporation from KSLC temperature, salinity from the UGS brine record, and a residual that `gsl-audit` reports
-- [ ] Reservoir storage and stable percent-of-median snowpack in candidate models
-- [ ] A smooth weight curve over the issue month, before a 3-component blend takes the headline
-- [ ] A performance page for out-of-sample accuracy
+Each issue contains a point forecast and the 5th, 25th, 50th, 75th, and 95th percentiles calibrated from retrospective errors. The public page emphasizes 2 summaries of the monthly path:
 
-## Overview
+- Maximum April–June monthly mean. This differs from a daily seasonal peak.
+- September monthly mean, which is the end of the water year. A water year runs from October 1 through September 30. September is not necessarily the annual minimum.
 
-The pipeline fetches the daily south-arm elevation from USGS, aggregates it to monthly means, joins the monthly covariates, runs a suite of time-series forecasters, and tracks experiments with [experiment-tracker](https://github.com/jcblsn/experiment-tracker). Results can be visualized and compared across models and forecast horizons.
+The project does not forecast the north arm, a daily peak, salinity, lake area, or lake volume as public targets.
 
-Data sources: the USGS Water Data API and the NRCS Air and Water Database (AWDB) API. Storage: DuckDB.
+## Method summary
 
-The models fall into 2 groups. The first group uses the lake record alone, and it sets the level
-that a useful model must clear. The second group adds snowpack, streamflow and the difference in
-level between the 2 arms of the lake. The displayed prototype number comes from a model that
-mixes one from each group. See [Frozen development results](#frozen-development-results).
+The headline model, `blend`, combines 2 forecasts:
 
-## Setup
+- `swe_head` fits the elevation change separately at each lead. Its predictors are current elevation, snow water equivalent, water-year precipitation, and the difference between the 2 arms. Snow water equivalent (SWE) is the depth of liquid water stored in the snowpack.
+- `ets_damped_s12` estimates a damped trend and a 12-month additive seasonal pattern from the lake record alone.
+
+The blend weight varies by lead and by 3 issue seasons: snow accumulation, snowmelt, and summer recession. A nested walk-forward fit chooses weights that minimize absolute error while the covariate-model share cannot increase with lead. The direct regressions use only past years with the same cutoff month. Each lead is fitted separately.
+
+This model is empirical. It does not conserve water or represent forecast uncertainty in future inflow. The repository also evaluates persistence, moving-average, drift, seasonal, inflow-recursion, structural state-space, and experimental storage-balance models. The [registry](src/forecasting/registry.py) defines the complete set and the subset exported in each issue.
+
+The [method page](site/methodology.qmd) gives the equations, data timing, interval algorithm, evaluation design, and source links. The implementation is under [src/forecasting](src/forecasting).
+
+## Install and test
+
+The package requires Python 3.11 or later and uses [`uv`](https://docs.astral.sh/uv/) for environment management.
 
 ```bash
-uv sync
-uv run --frozen pytest
-```
-
-Use `--frozen` on every command. Without it, `uv run` re-resolves the environment and can
-change `uv.lock` as a side effect.
-
-If `gsl-pipeline` appears to hang, the cause is usually IPv6. On some networks the route to
-`api.waterdata.usgs.gov` accepts the connection and then stops. `requests` tries IPv6 first
-and waits for the timeout, so each call takes about 40 seconds instead of less than 1
-second. Force IPv4 for local runs:
-
-```bash
-uv run --frozen python -c "
-import urllib3.util.connection as c, socket
-c.allowed_gai_family = lambda: socket.AF_INET
-from src.pipeline.elt import main; main()
-"
-```
-
-Append the pipeline flags after the closing quote, for example `--skip-covariates`.
-
-Modelling choices live in `config/config.json` under `forecasting`: `train_start`, `horizon`,
-`experiment_db`, `output_dir`, `headline_model`, `issue_status`, and `forecast_version`.
-The separate `evaluation_policy` object is the single machine-readable source for fixed
-development, sealed confirmation, and prospective cohorts.
-
-## CLI Commands
-
-### Run the ELT pipeline
-
-Fetches the daily south-arm elevation, then the covariates (see the [Data](#data) section), and populates the local DuckDB. Incremental: each table is fetched from its max date, and USGS series re-fetch the trailing 45 days so provisional values that USGS later revises are replaced. The first run pulls about 50 years of daily data and takes a few minutes.
-
-```bash
-uv run --frozen gsl-pipeline [--skip-covariates]
-```
-
-Elevation commits in its own transaction before the covariates, so an AWDB outage leaves the
-target series current. The current calendar month is excluded from `monthly_elevation` so a
-partial month is never treated as a full-month average. The same table retains the last valid
-daily elevation, its age at month end, robust 3- and 7-day endpoint estimates, their support,
-and provisional-observation counts.
-
-USGS WaterServices, the old source, is decommissioned in early 2027; the pipeline uses the replacement Water Data API. An API key is optional and raises the rate limit; set `USGS_API_KEY` in the environment to use one.
-
-### Run forecasts
-
-Fits the production subset of models (see `src/forecasting/registry.py`) on history from `train_start` and writes forward predictions to the `forecasts` table, tagged with `run_id`, `experiment_id`, and `data_max` so every prediction is traceable to a run and a data vintage.
-
-```bash
-uv run --frozen gsl-forecast [--horizon 24] [--train-start 1989-10-01] [--experiment-db forecast_experiments.db] [--export forecasts/2026-09-01.csv --intervals] [--site-data-dir site/data] [--allow-incomplete]
-```
-
-`--export` writes a dated CSV and required metadata sidecar. The sidecar records the issue
-status, forecast version, code commit and dirty-tree state, evaluation-policy version, data
-vintage, and headline calibration. A complete headline issue also writes an explanation
-sidecar. The three dated paths are write-once: if any already exists, the export fails before
-publishing anything. Mutable `site/data` views may be regenerated from the issue. Before
-fitting, the CLI checks data recency, gauge support in the last month, and required covariates.
-
-### Walk-forward cross-validation
-
-Uses the configured named development split by default: exactly 157 monthly cutoffs from
-2011-08-01 through 2024-08-01 at horizon 24. It logs the evaluation-policy version and exact
-bounds. The sealed confirmation split is rejected. Per-cutoff results are saved under
-`outputs/`; no committed results snapshot is written by default.
-
-```bash
-uv run --frozen gsl-cv [--split development] [--n-cutoffs 20] [--train-start 1989-10-01] [--output-dir outputs] [--no-plots] [--results-dir new/empty/path]
-```
-
-Pass `--n-cutoffs N` for a seeded sample within the named cohort, and `--models a,b` to
-evaluate a subset. `--results-dir` is opt-in and refuses any nonempty target directory.
-
-Besides per-horizon MAE, CV logs the targets `apr_jun_monthly_mean_max` and
-`september_monthly_mean` by issue date. It also logs `mean_pinball_loss` and `cov90` by lead
-from leave-one-year-out empirical intervals. A `headline_<stamp>.parquet` sits next to the
-per-cutoff parquet.
-
-The intervals hold out by cutoff year, but a cutoff late in year Y shares target months with cutoffs early in Y+1, so scores at long leads are slightly optimistic.
-
-### Benchmark against NRCS
-
-```bash
-uv run --frozen gsl-benchmark [--model ets_damped_s12]
-```
-
-Fits the named model at each published NRCS issue date and compares the maximum April–June
-monthly mean with the NRCS daily-peak outlook. The estimands differ, so both definitions remain
-explicit in the output.
-
-### Hindcast from a past cutoff
-
-```bash
-uv run --frozen gsl-hindcast 2022-03 2023-01 [--models swe_regression,ets_damped_s12] [--horizon 24] [--cv outputs/.../cv_results_<stamp>.parquet] [--output-dir <dir>]
-```
-
-Fits the named models on data through each given month, charts their forecasts with retrospective
-q05-q95 bands, and writes a PNG and CSV per cutoff under
-`outputs/hindcasts/<YYYY-MM-DD_HHMM>/`. Every cutoff in one command shares one run directory, and
-`run.json` in it records the cutoffs, the models, the horizon, the training start, the data
-maximum and the cross-validation file the bands came from.
-
-### Check whether the water adds up
-
-```bash
-uv run --frozen gsl-audit [--json outputs/audit.json] [--validate-salinity]
-```
-
-The command works out how much water the lake holds at the end of each month. It then
-subtracts every flow the project can measure. Some water is always left over, because no
-measurement is perfect. The command reports how much, and it breaks the total down by
-calendar month, by season, by how full the lake was, and by years the model never saw.
-
-The code calls the leftover `net_unmeasured_flux`. It is not evaporation, and it is not
-water that people used. It is a mixture of 4 things:
-
-- water that moved through the causeway to the north arm
-- error in how much river water actually reaches the lake
-- error in the map of the lake bed
-- the part of evaporation that air temperature alone cannot predict
-
-`--validate-salinity` compares this project's salt figures against a separate record that
-another group assembled. That record measures density rather than salt. The command does not
-borrow a formula to convert between them. It works the conversion out from the 1371 Utah
-Geological Survey samples that happen to report both.
-
-### Verify issued forecasts
-
-```bash
-uv run --frozen gsl-verify [--forecast-dir forecasts]
-```
-
-Requires and validates each dated issue's metadata, joins its forecast to observed monthly
-means, and writes MAE, bias and coverage grouped separately by issue status, forecast version,
-model, and lead. Specifications are never silently pooled.
-
-### Build the public page
-
-```bash
-quarto render site
-```
-
-Renders `site/` to `site/_site`. The page reads `site/data/latest.json` and
-`site/data/status.json`, which `gsl-forecast --site-data-dir` writes, so a render never
-refits a model. `.github/workflows/pages.yml` deploys the result to GitHub Pages on a push
-to `main` that changes the site or the model specification.
-
-### Plot forecasts
-
-Generates a plotnine chart of historical elevation + all model forecasts.
-
-```bash
-uv run --frozen gsl-plot [--history-years 10] [--output outputs/gsl_forecast.png]
-```
-
-## Frozen development results
-
-Walk-forward cross-validation: 157 month-end cutoffs from August 2011 to August 2024,
-24-month horizon, training from 1989-10, data through August 2026. This repeatedly used cohort
-is development evidence, not an untouched test set. Every number below comes from
-`GSL_CV_20260903_1751`; `data/results/manifest.json` freezes and hashes its snapshot. MAE is in
-feet. The ratio is `blend` MAE divided by `naive_last` MAE at the same lead, so below 1.00 beats
-a repeat of the last value. `gsl-results --tables` prints these 3 tables from those files,
-so a published number and the run behind it cannot drift apart.
-
-MAE by lead (ft):
-
-| Lead | blend | swe_head | swe_regression | inflow_chain | endpoint_seasonal | endpoint_analog | ets_damped_s12 | naive_last | Ratio (blend) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 0.13 | 0.13 | 0.13 | 0.14 | 0.10 | 0.11 | 0.14 | 0.34 | 0.37 |
-| 3 | 0.33 | 0.33 | 0.32 | 0.34 | 0.36 | 0.37 | 0.43 | 0.90 | 0.37 |
-| 6 | 0.58 | 0.55 | 0.57 | 0.58 | 0.65 | 0.69 | 0.81 | 1.33 | 0.43 |
-| 9 | 0.81 | 0.78 | 0.82 | 0.84 | 0.89 | 0.98 | 1.07 | 1.26 | 0.65 |
-| 12 | 1.08 | 1.04 | 1.09 | 1.12 | 1.12 | 1.25 | 1.25 | 1.28 | 0.84 |
-| 18 | 1.56 | 1.51 | 1.50 | 1.53 | 1.50 | 1.63 | 1.66 | 1.91 | 0.82 |
-| 24 | 1.92 | 2.01 | 1.86 | 1.85 | 1.70 | 1.86 | 1.92 | 1.79 | 1.07 |
-
-Weighted interval score and nominal central-90% coverage:
-
-| Lead | blend | swe_head | swe_regression | inflow_chain | endpoint_seasonal | endpoint_analog | ets_damped_s12 | naive_last |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 6 | 0.39 / 0.87 | 0.38 / 0.87 | 0.39 / 0.86 | 0.36 / 0.86 | 0.44 / 0.88 | 0.44 / 0.87 | 0.49 / 0.89 | 0.62 / 0.85 |
-| 12 | 0.72 / 0.87 | 0.70 / 0.89 | 0.71 / 0.88 | 0.67 / 0.88 | 0.78 / 0.86 | 0.79 / 0.84 | 0.78 / 0.86 | 0.78 / 0.85 |
-
-Headline scalars by issue date (MAE, ft):
-
-| Target | Issue | blend | swe_head | swe_regression | inflow_chain | endpoint_seasonal | endpoint_analog | ets_damped_s12 | naive_last |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Maximum April–June monthly mean | Jan 1 | 0.78 | 0.74 | 0.87 | 0.87 | 0.91 | 1.02 | 1.00 | 1.62 |
-| Maximum April–June monthly mean | Feb 1 | 0.65 | 0.63 | 0.64 | 0.61 | 0.83 | 0.94 | 0.83 | 1.39 |
-| Maximum April–June monthly mean | Mar 1 | 0.51 | 0.48 | 0.49 | 0.46 | 0.69 | 0.78 | 0.65 | 1.03 |
-| Maximum April–June monthly mean | Apr 1 | 0.33 | 0.33 | 0.31 | 0.30 | 0.45 | 0.46 | 0.38 | 0.62 |
-| Maximum April–June monthly mean | May 1 | 0.16 | 0.16 | 0.19 | 0.18 | 0.17 | 0.17 | 0.15 | 0.29 |
-| September mean (water-year end) | Jan 1 | 0.95 | 0.90 | 1.00 | 1.03 | 1.10 | 1.21 | 1.27 | 1.23 |
-| September mean (water-year end) | Apr 1 | 0.66 | 0.63 | 0.59 | 0.63 | 0.70 | 0.71 | 0.84 | 1.58 |
-| September mean (water-year end) | Jun 1 | 0.34 | 0.36 | 0.36 | 0.36 | 0.24 | 0.25 | 0.58 | 1.78 |
-| September mean (water-year end) | Jul 1 | 0.24 | 0.23 | 0.22 | 0.20 | 0.16 | 0.16 | 0.58 | 1.61 |
-| September mean (water-year end) | Aug 1 | 0.17 | 0.17 | 0.17 | 0.17 | 0.14 | 0.13 | 0.25 | 1.05 |
-
-Snowpack settles the winter case. From a January 1 issue, the model that uses the lake record
-alone has an April–June monthly-mean maximum error of 1.00 ft, which is no better than a repeat
-of the last value. Adding snowpack and the head difference between the arms brings it to
-0.74 ft. The summer decline is also predictable: from a June 1 issue, the September level is
-known to about a quarter of a foot, against 1.78 ft for a repeat of the last value.
-
-The state-only baselines are strong, which is the point of adding them. `endpoint_seasonal`,
-which is the last daily level plus the historical median change for the issue month and lead,
-is the best model at lead 1 (0.10 ft), at lead 24 (1.70 ft, ahead of `naive_last` at 1.79) and
-on the water-year-end target from June, July and August issues. It uses no snowpack and no
-streamflow. Conditioning its change on the current level, in `endpoint_analog`, does not help
-on this cohort.
-
-`blend` is still the prototype headline, but it no longer wins anywhere outright: `swe_head`
-matches or beats it at every lead to 18, and `endpoint_seasonal` beats both at 24. Its
-paired improvement over `naive_last` has an interval that excludes no improvement at leads 1,
-3, 6, 12 and 18, and includes it at 24. The review's recommendation to remove blend degrees
-of freedom unless they win a locked test is still open.
-
-The nominal central 90% interval is calibrated from retrospective errors, at 1 lead at a time
-and for the season the issue falls in. One band over every issue month gave the `blend` a
-coverage of 0.82 at lead 6 from an accumulation issue and 0.98 from a recession issue, both
-2.31 ft wide. The season-conditional band is 3.36 ft and 1.54 ft wide, at 0.89 and 0.93. The
-band is still marginal at each lead, so it does not give a probability for the spring maximum
-or the date of the minimum. The published point line is not necessarily q50. Section 7 of
-`docs/model-spec.md` gives the limits.
-
-Section 8.1 of `docs/model-spec.md` gives the block-bootstrap interval around every number
-above. At lead 6 the `blend` MAE interval is 0.451 to 0.736 ft. Differences of a few
-hundredths of a foot between the columns above are inside that.
-
-### Against the NRCS record
-
-`gsl-benchmark --refit` fits a model at each published NRCS issue date and scores its maximum
-April–June monthly mean. NRCS normally targets a daily peak, so the comparison retains both
-definitions. Errors are signed forecast minus actual, in feet.
-
-| Issue | NRCS | swe_regression | inflow_chain | ets_damped_s12 |
-|---|---|---|---|---|
-| 2024-03-01 | +0.30 | -0.47 | -0.17 | -0.19 |
-| 2024-04-01 | 0.00 | +0.04 | +0.21 | +0.19 |
-| 2025-02-01 | +0.07 | -0.09 | +0.24 | +0.43 |
-| 2025-04-01 | +0.47 | +0.20 | +0.42 | +0.41 |
-| 2025-05-01 | +0.17 | +0.01 | +0.12 | +0.15 |
-| 2026-01-01 | +0.14 | +0.37 | +0.46 | +0.50 |
-| 2026-04-01 | +0.04 | -0.11 | +0.07 | +0.38 |
-| Mean absolute | 0.17 | 0.18 | 0.24 | 0.32 |
-
-Seven issues is too few to rank anyone. The refits use today's data vintage rather than the
-vintage available at issue time. NRCS forecasts were genuinely issued in advance, and its daily
-peak target differs from the monthly-mean maximum scored for these models.
-
-## Querying Results
-
-The experiment tracker CLI (`expt`) can query any logged metric. It finds
-`forecast_experiments.db` by itself, so no `--db` flag is needed from the repository root:
-
-```bash
-# List experiments, newest first
-expt list
-
-# Runs for an experiment, with their notes
-expt runs <experiment_id>
-
-# The best model at a lead. Lowest wins, because the metric is an error
-expt best <experiment_id> --metric mae --dim h=6
-
-# MAE by lead, one column per lead
-expt metrics --metric mae --pivot h
-
-# What changed between 2 runs
-expt diff <run_a> <run_b> --metric mae
-
-# One line per run, the shape of docs/autoresearch.log
-expt log <experiment_id> --metric mae --dim h=6
-
-# Recompute a stored metric from the prediction rows behind it
-expt audit <run_id> --metric mae --dim h=6
-```
-
-CV runs log `mae`, `rmse`, `mae_ratio`, `mean_pinball_loss`, and `cov90`. Lead, target,
-and issue month are dimensions rather than parts of stored metric names. `gsl-results
-<experiment_id>` prints the historical research view; `--all-metrics` prints every logged row.
-
-The tracker database is a working file, and `.gitignore` excludes it. `data/results/` is the
-frozen development snapshot behind the tables above. `gsl-cv` never replaces it by default;
-an explicit snapshot must target a new, empty directory:
-
-| File | Content |
-|---|---|
-| `experiment.json` | The run label, cutoff span, horizon, `train_start`, data vintage, git commit, tree state and Python version |
-| `runs.csv` | One row per model, with its parameters, status and note |
-| `metrics.csv` | One row per metric and dimension, so every lead and issue month is in one table |
-| `manifest.json` | Development-only status, source run and commit, limitations, numeric-value digest, and SHA-256 hashes |
-
-`gsl-results --verify-manifest` verifies the hashes in CI. `gsl-results --tables` renders the
-snapshot without treating it as untouched confirmation evidence.
-
-Prediction rows stay in the database rather than the snapshot, because there are about 87,000
-of them per run. So `expt audit` checks a published number against its own rows locally, and
-the committed snapshot carries the summary rather than the evidence.
-
-
-## Models
-
-The table gives the name of each model in the code. The univariate baselines and experimental
-`state_space` model use the lake record alone; the regression, recursion and blend models add
-other measurements. `blend` is the experimental headline model. See [Terms](#terms) for SWE,
-head difference and hypsometry.
-
-| Model | Description |
-|-------|-------------|
-| `naive_last` | Repeat the latest monthly mean |
-| `naive_seasonal` | Repeat same month from prior year |
-| `endpoint_seasonal` | Select the last reading, 3-day median, or 7-day median by expanding training error, then add the historical median change for the issue month and lead |
-| `endpoint_analog` | `endpoint_seasonal` with the median taken over the 8 past origins whose own level was closest to the level now, so the seasonal change is conditioned on the level |
-| `ma_simple_{3,6,12}` | Simple moving average over N months |
-| `drift_{12,24,60}m` | Project average slope over last N months |
-| `ets_add_s12` | Holt-Winters: additive trend + additive seasonal |
-| `ets_damped_s12` | Holt-Winters: damped additive trend + additive seasonal (the best model that uses the lake record alone) |
-| `ets_add_noseas` | Holt linear trend, no seasonal component |
-| `ets_damped_noseas` | Holt damped trend, no seasonal component |
-| `theta` | Theta method: SES plus half the linear trend slope |
-| `swe_regression` | For the cutoff's calendar month and each lead, regresses the change in elevation on current level, basin month-end SWE and water-year precipitation across past years (the NRCS outlook generalised to every month and lead) |
-| `inflow_chain` | Snowpack predicts monthly tributary inflow; an empirical elevation-change regression rolls elevation forward. It does not conserve storage or close a physical water balance |
-| `swe_head` | `swe_regression` plus the south-minus-north head difference; strong for the April–June maximum from winter issues, worse beyond lead 15 |
-| `inflow_chain_area` | The same recursion with hypsometric area instead of elevation as one regressor; it is not a storage balance |
-| `water_balance` | The first model that counts the water instead of the level. Each month it adds the water the rivers bring and the rain that falls on the lake. It then subtracts the water that evaporates. The result is a volume, and the hypsometry table gives the level for that volume. Salt slows evaporation, so the model tracks the salt as well |
-| `water_balance_nosalt` | The same model, but it ignores the salt. The difference between the 2 models shows what the salt measurements are worth |
-| `state_space` | Experimental structural state-space baseline: local linear trend and monthly seasonality evolve hypsometric south-arm storage before conversion back to elevation. It uses no forecast inflow and is outside production |
-| `blend` | The prototype headline: `w` on `swe_head` and `1 - w` on `ets_damped_s12`, with `w` fitted for each lead and issue season |
-| `blend3_swe`, `blend3_chain` | Historical three-component blend candidates retained outside production |
-| `blend_swe` | The same with `swe_regression` as the snowpack component |
-
-All models implement the `Forecaster` ABC (`src/forecasting/base.py`) with `fit(df)`, `predict(h)`, and `get_metrics()`. The single list of models is `all_forecasters()` in `src/forecasting/registry.py`; `production_forecasters()` is the subset written by `gsl-forecast`.
-
-## Project Structure
-
-```
-src/
-  pipeline/
-    usgs.py             # USGS Water Data API fetcher, retry, upsert
-    elt.py              # South-arm elevation into DuckDB, monthly_elevation, transactions
-    covariates.py       # SNOTEL, reservoirs, discharge, north arm, NRCS forecasts; monthly_covariates
-    climate.py          # NOAA nClimDiv monthly temperature and precipitation
-  forecasting/
-    base.py             # Forecaster ABC
-    cutoffs.py          # The rule that selects walk-forward cutoffs
-    registry.py         # The one list of models (all / production subset)
-    run_forecast.py     # Fit production models, store predictions with run identity
-    cross_validate.py   # Walk-forward CV, per-cutoff parquet, per-horizon metrics
-    plots.py            # CV plots
-    plot_forecasts.py   # Plotnine visualization of actuals + forecasts
-    view_results.py     # Print experiment metrics via experiment tracker
-    data.py             # monthly_elevation joined to monthly_covariates
-    headline.py         # April-June maximum and September-mean scoring by issue month
-    quantiles.py        # Empirical intervals, mean pinball loss, coverage
-    benchmark.py        # gsl-benchmark: refit peaks and inflow next to the NRCS record
-    hypsometry.py       # South-arm area and volume from elevation (USGS 2023 tables)
-    verify.py           # gsl-verify: score dated forecasts in forecasts/
-    hindcast.py         # gsl-hindcast: chart past cutoffs against observations
-    multivariate/
-      regression.py     # Standardised ridge with a GCV penalty, and the fallback rule
-      swe_regression.py
-      inflow_chain.py
-      blend.py          # Prototype headline: a per-season, per-lead mix of components
-    univariate/
-      naive.py
-      moving_average.py
-      drift.py
-      exponential_smoothing.py
-      theta.py
-config/
-  config.json           # Site IDs, AWDB station sets, DB path, modelling defaults
-tests/                  # One file per module; in-memory DuckDB and fake HTTP responses
-data/
-  benchmarks/nrcs_outlooks.csv   # Published NRCS outlooks vs actual peaks, 2024-2026
-  external/gsl_south_arm_hypsometry.csv  # USGS 2023 elevation-area-volume table, 0.1 ft steps
-forecasts/              # One CSV per issue, named for the issue date (YYYY-MM-DD), with its sidecars
-site/                   # Quarto public page and the JSON data it reads
-docs/                   # Model spec, surveys, literature review, and the autoresearch program
-outputs/                # gitignored: CV parquet and PNGs
-```
-
-## Data
-
-Everything is stored in DuckDB (`./data/gsl.db`). Every source is a live API, so a forecast issued in any future month has the same inputs as this one.
-
-| Table | Source | Content |
-|-------|--------|---------|
-| `usgs_water_surface_elevation_daily` | USGS 10010000 (Saltair, south arm) | Daily mean elevation, 1847-present, with approval status |
-| `monthly_elevation` | Derived | Monthly mean/min/max and support plus last-valid, 3-day median, and 7-day median endpoint states, complete months only. `elevation_eom_ft` holds the state at the end of the month. A storage model moves from 1 such state to the next |
-| `forecasts` | Model output | Monthly predictions with run_id, experiment_id, data_max |
-| `snotel_sites`, `snotel_daily` | NRCS AWDB | SNOTEL sites in HUC 1601 (Bear), 160201 (Weber), 160202 (Provo-Jordan); daily SWE, water-year precipitation, 8-inch soil moisture, and the 1991-2020 median of SWE and precipitation, 1978-present |
-| `snotel_roster` | Derived | The versioned set of sites the snow features use, with the basin and the basin weight of each site. `config/config.json` names it; the current version is `gsl-modern-complete-v1` |
-| `reservoir_sites`, `reservoir_monthly` | NRCS AWDB (Bureau of Reclamation stations) | End-of-month storage, kaf (Bear Lake from 1911, Utah Lake from 1932, Jordanelle from 1993) |
-| `reservoir_roster` | Derived | The set of 13 reservoirs that the storage columns use, with a version. Before this table, the sum used the stations that replied on the day of the run. The count of stations moved from 1 to 21 to 19 |
-| `kslc_daily` | NOAA NCEI, GHCN-D USW00024127 | Daily maximum temperature, minimum temperature, wind and precipitation at the Salt Lake City airport, 1948 to now. NCEI publishes a day about 1 day later. The cutoff month is therefore complete when the forecast runs. The nClimDiv columns are not complete at that time |
-| `gsl_brine_samples` | Utah Geological Survey brine chemistry database | Samples from south-arm site AS2 and from site AC3, 1966 to now: salinity, density, TDS and depth. UGS collects about 2 sets of samples in a year |
-| `gsl_salt_mass_monthly` | Derived | The dissolved salt in the south arm, in million tonnes. It is the AS2 upper-brine salinity multiplied by the volume of the lake. `salt_mass_age_days` gives the age of the value in days |
-| `gsl_hypsometry` | USGS 2023 topobathymetry | The elevation-area-volume table in the database. The monthly transform uses it to change an elevation into a volume in SQL |
-| `usgs_discharge_daily` | USGS 10126000 (Bear), 10141000 (Weber), 10170490 (Jordan plus Surplus Canal), 10010020 (causeway breach) | Daily mean discharge, cfs |
-| `usgs_north_arm_elevation_daily` | USGS 10010100 (Saline) | Daily north-arm elevation, 1966-present |
-| `climdiv_monthly` | NOAA nClimDiv, Utah divisions 03 (North Central) and 05 (Northern Mountains) | Monthly mean temperature and precipitation, 1895-present; a month is released around the 8th of the next month, so the cutoff month is always missing at issue time. Only the `_lag1` copies reach `monthly_covariates`, so a model cannot read a value that does not exist at issue time |
-| `nrcs_inflow_forecasts` | NRCS AWDB forecast point 10010000:UT:USGS | Published Great Salt Lake inflow forecast at 10/30/50/70/90 percent exceedance and the period normal, monthly January-May since 2024 |
-| `monthly_covariates` | Derived | One row per complete month: `swe_eom_*`, `prec_wy_eom_*`, `swe_pct_median_*`, `prec_pct_median_*`, `sms_eom_*` per basin and pooled (`_gsl`) with `n_snotel_sites`, `n_snotel_prec` and `n_snotel_sms`, and `snotel_roster_version`; `res_kaf_*` per basin and `res_kaf_total` with `n_reservoirs`; `inflow_kaf_*` per river, `inflow_kaf_total`, `inflow_kaf_lake` (the gauged sum divided by the delivery ratio) and `inflow_kaf_reported` with `inflow_day_coverage`, `inflow_provisional_days`, `inflow_estimated_days`, `inflow_ice_days` and `n_inflow_gauges`; `breach_kaf`; `tmax_f_kslc`, `tmin_f_kslc`, `wind_mps_kslc` and `prcp_in_kslc` with `kslc_day_coverage`; `salt_mass_mt` and `salinity_gl_lag1`; `north_arm_ft` and `head_diff_ft` (south minus north); `tavg_f_gsl_lag1` and `prcp_in_gsl_lag1`, the climate columns shifted one month |
-
-Snowpack at month end is the mean over the roster sites reporting in the last 5 days of the month, each site at its own last valid day, and each variable counting its own reporting sites. Every pooled (`_gsl`) column averages the basins under the roster's declared basin weights, so the basin with the most sites does not decide the index. The roster is fixed and versioned, so the index does not change when AWDB retires a site or when an earlier run leaves an extra site in the database. Young sites without a 30-year median count in the mean but not in the percent. Reservoir storage is summed over the stations reporting, so sums before a dam was built are smaller for a physical reason. The south-arm level is also managed at the causeway: the breach berm was raised in 2022, overtopped in 2023, and HB1001 (2025) lets the state raise it to 4,192 ft when the south arm is at or below 4,190 ft; `head_diff_ft` and `breach_kaf` carry that signal.
-
-Before October 1989 the target observations have materially different temporal support; many
-nominal monthly means are based on sparse readings rather than near-daily coverage. New model
-fits therefore default to 1989-10 onward. Earlier rows remain available only for explicit
-sensitivity experiments.
-
-### Does the water add up?
-
-Water arrives in the lake from 3 rivers. Water leaves by evaporating. Until now this project
-measured only the water arriving.
-
-Each river has a gauge near the bottom, just above the lake. From 1989 to 2025 the water
-those gauges measure does not account for how much the lake changes. In each water year the
-lake ends up between 874 and 2689 kaf lower than the rivers alone can explain. The water
-nobody measured is larger than the water they did.
-
-That missing water is evaporation. 3 things point to it:
-
-- The lake loses 3.53 ft of depth in an average year. That is what a salty lake in a desert
-  loses.
-- The loss reaches 0.71 ft in August and falls to near 0 in February. Evaporation follows the
-  sun.
-- The loss follows the air temperature of the month before, with a correlation of +0.856.
-
-`gsl-audit` puts the missing water back and reports what is still left over:
-
-| What the sum counts | Water left over |
-|---|---|
-| The 3 river gauges only | 143 kaf, or 0.304 ft of lake depth each month |
-| Rivers, evaporation, rain on the lake, and salt | 58 kaf, or 0.129 ft each month |
-
-The leftover stays the same size whether the lake is high or low. Across 4 bands of lake
-level it varies between 53 and 69 kaf, and its average is within 7 kaf of 0 in every band.
-It also stays the same size in years the model never saw while it was being fitted: 0.114,
-0.124 and 0.164 ft per month across 3 such blocks of years. The recent block, 2015 to 2026,
-is the worst of the 3. The lake is at its lowest in those years.
-
-This says where the remaining forecast error comes from. Suppose the next year's river flow,
-temperature and rainfall were all known exactly. A forecast 6 months out would still miss the
-gauge by 0.44 ft, because the measurements do not agree with each other any better than that.
-The best model today misses by 0.55 ft at 6 months. So most of the error at that range comes
-from the measurements, not from guessing the weather wrong.
-
-The repairs described above do not change the input of any model that is in production. The
-frozen development results are therefore still correct, and `gsl-results --verify-manifest`
-still passes.
-
-## Tests and lint
-
-```bash
-uv run --frozen pytest
+uv sync --frozen
+uv run --frozen pytest -q
 uv run --frozen ruff check src tests
 uv run --frozen ruff format --check src tests
+```
+
+The site also requires [Quarto](https://quarto.org/). CI uses Quarto 1.7.32.
+
+## Run the workflow
+
+The following sequence refreshes the data, evaluates the models, writes a dated issue, verifies all observed issues, and renders the site. Replace `YYYY-MM` with the issue year and month.
+
+```bash
+uv run --frozen gsl-pipeline
+uv run --frozen gsl-cv --no-plots
+uv run --frozen gsl-forecast \
+  --export forecasts/YYYY-MM-01.csv \
+  --intervals \
+  --site-data-dir site/data
+uv run --frozen gsl-verify
 quarto render site
 ```
 
-CI runs the same checks on every push.
+`gsl-pipeline` writes `data/gsl.db`. The database and evaluation outputs are ignored by Git. The full development evaluation fits every registered model at all 157 cutoffs. Use `gsl-cv --n-cutoffs N` only for a faster diagnostic sample, not for a reported result.
+
+A dated export is write-once. The command fails if its CSV, metadata sidecar, or explanation sidecar already exists. It also refuses stale or incomplete inputs unless `--allow-incomplete` is set. That option records the problems and suppresses a complete headline issue; it is intended for diagnosis, not routine publication.
+
+Every command accepts `--help`. The main entry points are:
+
+| Command | Purpose |
+| --- | --- |
+| `gsl-pipeline` | Refresh the target and covariates from their sources |
+| `gsl-forecast` | Fit configured issue models and optionally export a dated issue |
+| `gsl-cv` | Run walk-forward evaluation on an open policy split |
+| `gsl-verify` | Score dated issues as observations become available |
+| `gsl-benchmark` | Compare spring-maximum refits with the small NRCS outlook record |
+| `gsl-hindcast` | Plot forecasts made from specified historical cutoffs |
+| `gsl-audit` | Report closure errors in the experimental storage balance |
+| `gsl-results` | Inspect an experiment or verify the frozen result snapshot |
+| `gsl-plot` | Plot stored forecasts with recent observations |
+
+Source services can be unavailable or can revise provisional values. The pipeline commits the target before it fetches covariates. A covariate outage can therefore leave those groups at different dates; the forecast command checks for this condition. Some networks also expose a broken IPv6 route to the USGS API, which can make each request stall. Test the endpoint over IPv4 if a refresh pauses repeatedly without an HTTP error.
+
+## Reproducibility and provenance
+
+The current configuration is [config/config.json](config/config.json). It fixes the gauge IDs, the 29-site SNOTEL roster, basin weights, training start, horizon, headline model, and evaluation policy. Data ingestion lives in [src/pipeline](src/pipeline), and tests for data availability and temporal leakage live in [tests](tests).
+
+Primary data sources are:
+
+- [USGS Water Data for gauge 10010000](https://waterdata.usgs.gov/monitoring-location/USGS-10010000/) for the target elevation. The [configuration](config/config.json) identifies the other USGS gauges.
+- [NRCS Air and Water Database REST API](https://wcc.sc.egov.usda.gov/awdbRestApi/swagger-ui/index.html) for SNOTEL observations, reservoir storage, and issued seasonal inflow forecasts.
+- [USGS elevation-area-volume tables](https://doi.org/10.5066/P9DGG75W), preserved locally as [data/external/gsl_south_arm_hypsometry.csv](data/external/gsl_south_arm_hypsometry.csv).
+- [NOAA NCEI daily summaries](https://www.ncei.noaa.gov/support/access-data-service-api-user-documentation) for experimental airport weather inputs.
+- [NOAA nClimDiv](https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.ncdc%3AC00005%3Bview%3Diso) for experimental climate-division inputs.
+- The [Utah Geological Survey brine database](https://geology.utah.gov/popular/great-salt-lake/) for experimental salinity and salt-mass inputs.
+
+The frozen summary in [data/results](data/results) is content-addressed, but its [experiment record](data/results/experiment.json) reports a dirty source worktree. The source commit therefore cannot reconstruct the exact evaluation code by itself. The snapshot preserves the reported numbers, not the row-level predictions used to calculate them.
+
+Each file under [forecasts](forecasts) has a metadata sidecar. Current exports record the issue status, forecast version, code state, resolved-configuration hash, modeling-table hash, data support, and interval calibration. Older artifacts can predate some provenance fields. Keep results from different forecast versions and issue statuses separate.
+
+## Repository map
+
+| Path | Contents |
+| --- | --- |
+| `src/pipeline/` | Source ingestion, quality fields, and monthly feature construction |
+| `src/forecasting/` | Models, intervals, evaluation, exports, and verification |
+| `config/config.json` | Source IDs, rosters, model defaults, and evaluation policy |
+| `data/results/` | Frozen development summary and integrity manifest |
+| `forecasts/` | Immutable dated issues and sidecars |
+| `site/` | Quarto source and generated forecast data |
+| `tests/` | Unit, leakage, export, and end-to-end tests |
+| `.archive/docs/` | Historical reviews, surveys, specifications, and experiment records |
+
+The [archive index](.archive/docs/README.md) explains why each former document was retired.

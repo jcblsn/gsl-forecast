@@ -1,17 +1,14 @@
-"""Approval status and qualifier codes for USGS daily values.
+"""Normalize USGS approval status and qualifier codes for daily values.
 
-USGS has used two vocabularies in the record this project holds. Older rows carry the single
-letters `A` and `P`. Newer rows carry the words `Approved` and `Provisional`. A pattern match
-on one word therefore misses the other, and the count of provisional days becomes wrong
-without an error. These helpers give one definition of each flag, and every reader uses it.
+Historical rows use both single-letter and full-word approval labels. These helpers map
+both forms to one representation before the pipeline counts provisional or qualified days.
 """
 
 APPROVED = "approved"
 PROVISIONAL = "provisional"
 UNKNOWN = "unknown"
 
-# Qualifier codes USGS attaches beside the approval status. Each one says the value is less
-# trustworthy than a plain measurement, so each one is counted.
+# Qualifier codes retained as data-quality context beside the approval status.
 QUALIFIER_CODES = ("estimated", "ice", "equip", "revised", "forceinterpolation")
 
 _APPROVAL_WORDS = {
@@ -23,12 +20,7 @@ _APPROVAL_WORDS = {
 
 
 def normalize_flags(approval: str | None, qualifiers: list[str] | str | None) -> str:
-    """The canonical flag string for one daily value.
-
-    The approval status comes first as a full word, then the qualifier codes in lower case.
-    Both vocabularies map to the same output, so a row ingested today and the same row
-    ingested in 2019 compare equal.
-    """
+    """Return a lowercase approval label followed by any qualifier codes."""
     codes = qualifiers if isinstance(qualifiers, list) else [qualifiers] if qualifiers else []
     parts = [_APPROVAL_WORDS.get(str(approval or "").strip().lower(), UNKNOWN)]
     parts += [str(c).strip().lower() for c in codes if str(c).strip()]

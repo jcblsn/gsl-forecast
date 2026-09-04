@@ -17,7 +17,7 @@ SWE_HEAD_FEATURES = ["swe_eom_gsl", "prec_wy_eom_gsl", "head_diff_ft"]
 
 
 def _anchor() -> tuple[str, object]:
-    """The last component of every blend: the best model that uses the lake record alone."""
+    """Return the elevation-only component used as the final blend anchor."""
     return (
         "ets_damped_s12",
         lambda: HoltWintersForecaster(
@@ -34,12 +34,7 @@ def _swe_head() -> tuple[str, object]:
 
 
 def three_component_blends() -> list[Forecaster]:
-    """One blend for each candidate second covariate component.
-
-    `blend` is strong to lead 12 and weak past lead 18, because `swe_head` is. Each model
-    below adds a component that is strong where `swe_head` is weak, and the fitted weight
-    decides where to use it. The experimental state-space baseline is not a blend candidate.
-    """
+    """Return 1 blend for each candidate second covariate component."""
     second = {
         "blend3_swe": (
             "swe_regression",

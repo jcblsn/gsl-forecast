@@ -12,14 +12,14 @@ website:
       - href: index.qmd
         text: Forecast
       - href: methodology.qmd
-        text: Method
+        text: Method and evidence
     right:
       - icon: github
         href: "https://github.com/jcblsn/gsl-forecast"
         aria-label: Source repository
   page-footer:
-    left: "South-arm monthly mean at USGS Saltair gauge 10010000"
-    right: "Data: USGS and NRCS"
+    left: "South-arm calendar-month mean at USGS gauge 10010000"
+    right: "Experimental research forecast"
 
 format:
   html:
@@ -29,4 +29,4 @@ format:
     page-layout: full
     include-in-header:
       text: |
-        <meta name="description" content="A dated 24-month forecast of Great Salt Lake south-arm elevation.">
+        <meta name="description" content="An experimental forecast of Great Salt Lake south-arm monthly mean elevation.">

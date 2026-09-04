@@ -1,13 +1,8 @@
-"""Empirical prediction intervals and probabilistic scores.
+"""Calibrate empirical forecast intervals and calculate probabilistic scores.
 
-Point forecasters get intervals from their own walk-forward errors: for each horizon the
-quantiles of past (actual - pred) are added to the point forecast. Scoring uses pinball loss
-averaged over the quantile set and the empirical coverage of the nominal central 90% interval.
-
-The errors are strongly heteroskedastic by issue season, so a band pooled over every issue
-month is too wide in one season and too narrow in another. The band is therefore scaled by
-the issue season. Coverage is reported by season as well as in aggregate, because an
-aggregate coverage near 0.90 hides a season at 0.83 and a season at 0.98.
+The method adds quantiles of walk-forward errors to each point forecast. Error location and
+scale vary by issue season; standardized tail shape is pooled across seasons. Scores include
+pinball loss, weighted interval score, central-90% coverage, and interval width.
 """
 
 import numpy as np
@@ -36,17 +31,10 @@ def with_season(cv_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def season_shape(err: pd.DataFrame, prior: float = SEASON_SCALE_PRIOR) -> pd.DataFrame:
-    """Per model, horizon and season, the centre and the width of the band.
+    """Per model, lead, and season, return the center and width of the band.
 
-    A season cell holds about 13 to 22 errors at 1 lead, which is too few to read a 5% or a
-    95% quantile from. The centre and the width are estimable from that many errors, but the
-    shape of the tail is not. Therefore the centre and the width are conditional on the
-    season and the shape is pooled.
-
-    The centre is the median of the season's errors and the width is their mean absolute
-    deviation from that median. Each is a convex combination of the season's value and the
-    pooled value, with weight `n / (n + prior)`. A season with few errors keeps close to the
-    pooled value; a season with many moves toward its own.
+    The center is the median error. The width is its mean absolute deviation. Both shrink
+    toward their pooled values with seasonal weight `n / (n + prior)`.
     """
     pooled = err.groupby(["model", "h"])["err"].median().rename("m0")
     joined = err.join(pooled, on=["model", "h"])
@@ -74,26 +62,17 @@ def season_shape(err: pd.DataFrame, prior: float = SEASON_SCALE_PRIOR) -> pd.Dat
 def error_quantiles(
     cv_df: pd.DataFrame, quantiles=QUANTILES, prior: float = SEASON_SCALE_PRIOR
 ) -> pd.DataFrame:
-    """Per model, issue season and horizon, quantiles of (actual - pred) from CV errors.
+    """Per model, issue season, and lead, return quantiles of walk-forward errors.
 
-    `season_shape` gives the centre and the width of each season's band. Every error is then
-    standardised by the centre and the width of its own season, and the quantiles of those
-    standardised errors are pooled over the seasons. A season's band is its centre plus its
-    width multiplied by that pooled shape.
-
-    Standardising before pooling matters. Pooling the raw errors would give every season the
-    tail of whichever season has the widest errors, so a band scaled down for a narrow season
-    would keep a skew the narrow season does not have.
-
-    The result carries every season in `SEASON_MONTHS`, so a forecast issued in a season the
-    cross-validation never covered still gets a band.
+    The function standardizes errors with each season's center and width. It pools standardized
+    quantiles across seasons, then restores each seasonal scale. Missing seasons receive the
+    average seasonal center and width.
     """
     err = with_season(cv_df).assign(err=lambda d: d["actual"] - d["pred"])
     shape = season_shape(err, prior)
     keys = ["model", "h", SEASON_COL]
     z = err.join(shape, on=keys)
-    # A season whose errors are all the same has 0 width. Its standardised error is then 0
-    # and its band collapses onto its centre, which is what a constant error deserves.
+    # A season whose errors are constant has 0 width. Its interval collapses to its center.
     z["z"] = (z["err"] - z["center"]) / z["width"].where(z["width"] > 0, 1.0)
     pooled = z.groupby(["model", "h"])["z"].quantile(list(quantiles)).unstack()
     pooled.columns = [qcol(q) for q in quantiles]
@@ -156,15 +135,10 @@ def interval_pairs(quantiles=QUANTILES) -> list[tuple[float, float, float]]:
 def weighted_interval_score(
     actual: np.ndarray, scored: pd.DataFrame, quantiles=QUANTILES
 ) -> np.ndarray:
-    """The weighted interval score of Bracher and others (2021), 1 value per row.
+    """Return weighted interval score (Bracher et al., 2021) for each row.
 
-    WIS is the recognized finite-quantile approximation to the continuous ranked probability
-    score. It adds the absolute error of the median to the interval score of each central
-    interval, each weighted by its own alpha, and divides by the number of terms.
-
-    For a symmetric quantile set such as the default 5, WIS is exactly twice the unweighted
-    mean pinball loss. It is reported because it carries a recognized name and a recognized
-    definition, which the mean of 5 pinball losses does not.
+    The score combines median absolute error with alpha-weighted central interval scores.
+    For the default symmetric quantiles, it equals twice the mean pinball loss.
     """
     pairs = interval_pairs(quantiles)
     if not pairs or not any(abs(q - 0.5) < 1e-9 for q in quantiles):

@@ -1,11 +1,7 @@
-"""Print the metrics of one cross-validation run.
+"""Inspect a tracked cross-validation run or the frozen development snapshot.
 
-The command has 2 modes. With an experiment id it reads the experiment tracker database,
-which is the working file for a run in progress. With `--tables` it reads the frozen
-development snapshot under `data/results/`.
-
-Metrics are stored with their dimensions, so a lead is data and not part of a name. Labels
-like `mae_h6` exist only for display and for the command line.
+Metrics store lead and target as dimensions. Flattened labels such as `mae_h6` exist only
+for display and command-line selection.
 """
 
 import argparse
@@ -127,7 +123,7 @@ def view_experiment(
 
 
 def print_tables(results_dir: str = RESULTS_DIR, models: list[str] | None = None) -> str:
-    """The markdown tables for the README and for `docs/model-spec.md`."""
+    """Print Markdown tables from the frozen development summary."""
     summary, headline, meta = read_results(results_dir)
     text = render_tables(summary, headline, meta, models)
     print(text)
@@ -135,7 +131,7 @@ def print_tables(results_dir: str = RESULTS_DIR, models: list[str] | None = None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="View experiment results")
+    parser = argparse.ArgumentParser(description="Inspect cross-validation results")
     parser.add_argument(
         "experiment_id", type=int, nargs="?", help="Experiment ID to view; omit with --tables"
     )

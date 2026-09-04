@@ -11,16 +11,10 @@ from src.pipeline.usgs import ingest_elevation
 
 SOUTH_ARM_TABLE = "usgs_water_surface_elevation_daily"
 
-# `avg_elevation` is a mean over the days of the month. A water balance closes between two
-# instants, not between two means, so a storage model needs an end-of-month state. These are
-# the candidate rules for that state. The literal last day is one wind event away from a
-# value the whole month does not support, so a short median is offered beside it.
-#
-# Measured over 1989-2026, more smoothing always closes the balance better: the residual is
-# 0.136 ft/month for `last`, 0.129 for `median_3d` and 0.121 for `median_7d`. Forecast
-# accuracy does not follow. Lead-1 MAE is 0.094, 0.093 and 0.103 ft for the same 3 rules, so
-# `last` and `median_3d` cannot be told apart and `median_7d` is worse. `median_3d` is the
-# default because it matches the best forecast and resists a single wind-driven reading.
+# The target is a monthly mean, but a storage balance needs an end-of-month state. In the
+# reused development period, lead-1 MAE was 0.094 ft for the last reading, 0.093 ft for the
+# 3-day median, and 0.103 ft for the 7-day median. The 3-day rule is the configured tradeoff
+# between smoothing and development error; it is not independent test evidence.
 ENDPOINT_RULES = {
     "last": "last_elevation",
     "median_3d": "endpoint_3d_median",
@@ -128,7 +122,7 @@ def run_pipeline(config_path: str | None = None, skip_covariates: bool = False) 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch USGS data into the local DuckDB")
+    parser = argparse.ArgumentParser(description="Refresh forecast inputs in the local DuckDB")
     parser.add_argument("--config", help="Path to config file")
     parser.add_argument("--skip-covariates", action="store_true")
     args = parser.parse_args()
