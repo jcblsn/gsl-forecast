@@ -95,6 +95,7 @@ better than a repeat of the last value (see [Frozen development results](#frozen
 - [x] Historical autoresearch pass for the multivariate models, recorded in `docs/autoresearch.log`; the active keep/revert loop is retired
 - [x] Bathymetry (USGS elevation-area-volume table) as `inflow_chain_area`; climate-division temperature and precipitation ingested
 - [x] One blended prototype headline model (`blend`), and an experimental page on GitHub Pages
+- [x] Close a water balance in storage: a state at the end of the month, evaporation from KSLC temperature, salinity from the UGS brine record, and a residual that `gsl-audit` reports
 - [ ] Reservoir storage and stable percent-of-median snowpack in candidate models
 - [ ] A smooth weight curve over the issue month, before a 3-component blend takes the headline
 - [ ] A performance page for out-of-sample accuracy
@@ -215,6 +216,30 @@ q05-q95 bands, and writes a PNG and CSV per cutoff under
 `outputs/hindcasts/<YYYY-MM-DD_HHMM>/`. Every cutoff in one command shares one run directory, and
 `run.json` in it records the cutoffs, the models, the horizon, the training start, the data
 maximum and the cross-validation file the bands came from.
+
+### Check whether the water adds up
+
+```bash
+uv run --frozen gsl-audit [--json outputs/audit.json] [--validate-salinity]
+```
+
+The command works out how much water the lake holds at the end of each month. It then
+subtracts every flow the project can measure. Some water is always left over, because no
+measurement is perfect. The command reports how much, and it breaks the total down by
+calendar month, by season, by how full the lake was, and by years the model never saw.
+
+The code calls the leftover `net_unmeasured_flux`. It is not evaporation, and it is not
+water that people used. It is a mixture of 4 things:
+
+- water that moved through the causeway to the north arm
+- error in how much river water actually reaches the lake
+- error in the map of the lake bed
+- the part of evaporation that air temperature alone cannot predict
+
+`--validate-salinity` compares this project's salt figures against a separate record that
+another group assembled. That record measures density rather than salt. The command does not
+borrow a formula to convert between them. It works the conversion out from the 1371 Utah
+Geological Survey samples that happen to report both.
 
 ### Verify issued forecasts
 
@@ -416,6 +441,8 @@ head difference and hypsometry.
 | `inflow_chain` | Snowpack predicts monthly tributary inflow; an empirical elevation-change regression rolls elevation forward. It does not conserve storage or close a physical water balance |
 | `swe_head` | `swe_regression` plus the south-minus-north head difference; strong for the April–June maximum from winter issues, worse beyond lead 15 |
 | `inflow_chain_area` | The same recursion with hypsometric area instead of elevation as one regressor; it is not a storage balance |
+| `water_balance` | The first model that counts the water instead of the level. Each month it adds the water the rivers bring and the rain that falls on the lake. It then subtracts the water that evaporates. The result is a volume, and the hypsometry table gives the level for that volume. Salt slows evaporation, so the model tracks the salt as well |
+| `water_balance_nosalt` | The same model, but it ignores the salt. The difference between the 2 models shows what the salt measurements are worth |
 | `state_space` | Experimental structural state-space baseline: local linear trend and monthly seasonality evolve hypsometric south-arm storage before conversion back to elevation. It uses no forecast inflow and is outside production |
 | `blend` | The prototype headline: `w` on `swe_head` and `1 - w` on `ets_damped_s12`, with `w` fitted for each lead and issue season |
 | `blend3_swe`, `blend3_chain` | Historical three-component blend candidates retained outside production |
@@ -478,16 +505,21 @@ Everything is stored in DuckDB (`./data/gsl.db`). Every source is a live API, so
 | Table | Source | Content |
 |-------|--------|---------|
 | `usgs_water_surface_elevation_daily` | USGS 10010000 (Saltair, south arm) | Daily mean elevation, 1847-present, with approval status |
-| `monthly_elevation` | Derived | Monthly mean/min/max and support plus last-valid, 3-day median, and 7-day median endpoint states, complete months only |
+| `monthly_elevation` | Derived | Monthly mean/min/max and support plus last-valid, 3-day median, and 7-day median endpoint states, complete months only. `elevation_eom_ft` holds the state at the end of the month. A storage model moves from 1 such state to the next |
 | `forecasts` | Model output | Monthly predictions with run_id, experiment_id, data_max |
 | `snotel_sites`, `snotel_daily` | NRCS AWDB | SNOTEL sites in HUC 1601 (Bear), 160201 (Weber), 160202 (Provo-Jordan); daily SWE, water-year precipitation, 8-inch soil moisture, and the 1991-2020 median of SWE and precipitation, 1978-present |
 | `snotel_roster` | Derived | The versioned set of sites the snow features use, with the basin and the basin weight of each site. `config/config.json` names it; the current version is `gsl-modern-complete-v1` |
-| `reservoir_sites`, `reservoir_monthly` | NRCS AWDB (Bureau of Reclamation stations) | End-of-month storage, kaf, for the 21 reservoirs in the same units (Bear Lake from 1911, Utah Lake from 1932, Jordanelle from 1993) |
+| `reservoir_sites`, `reservoir_monthly` | NRCS AWDB (Bureau of Reclamation stations) | End-of-month storage, kaf (Bear Lake from 1911, Utah Lake from 1932, Jordanelle from 1993) |
+| `reservoir_roster` | Derived | The set of 13 reservoirs that the storage columns use, with a version. Before this table, the sum used the stations that replied on the day of the run. The count of stations moved from 1 to 21 to 19 |
+| `kslc_daily` | NOAA NCEI, GHCN-D USW00024127 | Daily maximum temperature, minimum temperature, wind and precipitation at the Salt Lake City airport, 1948 to now. NCEI publishes a day about 1 day later. The cutoff month is therefore complete when the forecast runs. The nClimDiv columns are not complete at that time |
+| `gsl_brine_samples` | Utah Geological Survey brine chemistry database | Samples from south-arm site AS2 and from site AC3, 1966 to now: salinity, density, TDS and depth. UGS collects about 2 sets of samples in a year |
+| `gsl_salt_mass_monthly` | Derived | The dissolved salt in the south arm, in million tonnes. It is the AS2 upper-brine salinity multiplied by the volume of the lake. `salt_mass_age_days` gives the age of the value in days |
+| `gsl_hypsometry` | USGS 2023 topobathymetry | The elevation-area-volume table in the database. The monthly transform uses it to change an elevation into a volume in SQL |
 | `usgs_discharge_daily` | USGS 10126000 (Bear), 10141000 (Weber), 10170490 (Jordan plus Surplus Canal), 10010020 (causeway breach) | Daily mean discharge, cfs |
 | `usgs_north_arm_elevation_daily` | USGS 10010100 (Saline) | Daily north-arm elevation, 1966-present |
 | `climdiv_monthly` | NOAA nClimDiv, Utah divisions 03 (North Central) and 05 (Northern Mountains) | Monthly mean temperature and precipitation, 1895-present; a month is released around the 8th of the next month, so the cutoff month is always missing at issue time. Only the `_lag1` copies reach `monthly_covariates`, so a model cannot read a value that does not exist at issue time |
 | `nrcs_inflow_forecasts` | NRCS AWDB forecast point 10010000:UT:USGS | Published Great Salt Lake inflow forecast at 10/30/50/70/90 percent exceedance and the period normal, monthly January-May since 2024 |
-| `monthly_covariates` | Derived | One row per complete month: `swe_eom_*`, `prec_wy_eom_*`, `swe_pct_median_*`, `prec_pct_median_*`, `sms_eom_*` per basin and pooled (`_gsl`) with `n_snotel_sites`, `n_snotel_prec` and `n_snotel_sms`, and `snotel_roster_version`; `res_kaf_*` per basin and `res_kaf_total` with `n_reservoirs`; `inflow_kaf_*` per river and `inflow_kaf_total` with `inflow_day_coverage`, `inflow_provisional_days` and `inflow_estimated_days`; `breach_kaf`; `north_arm_ft` and `head_diff_ft` (south minus north); `tavg_f_gsl_lag1` and `prcp_in_gsl_lag1`, the climate columns shifted one month |
+| `monthly_covariates` | Derived | One row per complete month: `swe_eom_*`, `prec_wy_eom_*`, `swe_pct_median_*`, `prec_pct_median_*`, `sms_eom_*` per basin and pooled (`_gsl`) with `n_snotel_sites`, `n_snotel_prec` and `n_snotel_sms`, and `snotel_roster_version`; `res_kaf_*` per basin and `res_kaf_total` with `n_reservoirs`; `inflow_kaf_*` per river, `inflow_kaf_total`, `inflow_kaf_lake` (the gauged sum divided by the delivery ratio) and `inflow_kaf_reported` with `inflow_day_coverage`, `inflow_provisional_days`, `inflow_estimated_days`, `inflow_ice_days` and `n_inflow_gauges`; `breach_kaf`; `tmax_f_kslc`, `tmin_f_kslc`, `wind_mps_kslc` and `prcp_in_kslc` with `kslc_day_coverage`; `salt_mass_mt` and `salinity_gl_lag1`; `north_arm_ft` and `head_diff_ft` (south minus north); `tavg_f_gsl_lag1` and `prcp_in_gsl_lag1`, the climate columns shifted one month |
 
 Snowpack at month end is the mean over the roster sites reporting in the last 5 days of the month, each site at its own last valid day, and each variable counting its own reporting sites. Every pooled (`_gsl`) column averages the basins under the roster's declared basin weights, so the basin with the most sites does not decide the index. The roster is fixed and versioned, so the index does not change when AWDB retires a site or when an earlier run leaves an extra site in the database. Young sites without a 30-year median count in the mean but not in the percent. Reservoir storage is summed over the stations reporting, so sums before a dam was built are smaller for a physical reason. The south-arm level is also managed at the causeway: the breach berm was raised in 2022, overtopped in 2023, and HB1001 (2025) lets the state raise it to 4,192 ft when the south arm is at or below 4,190 ft; `head_diff_ft` and `breach_kaf` carry that signal.
 
@@ -495,6 +527,47 @@ Before October 1989 the target observations have materially different temporal s
 nominal monthly means are based on sparse readings rather than near-daily coverage. New model
 fits therefore default to 1989-10 onward. Earlier rows remain available only for explicit
 sensitivity experiments.
+
+### Does the water add up?
+
+Water arrives in the lake from 3 rivers. Water leaves by evaporating. Until now this project
+measured only the water arriving.
+
+Each river has a gauge near the bottom, just above the lake. From 1989 to 2025 the water
+those gauges measure does not account for how much the lake changes. In each water year the
+lake ends up between 874 and 2689 kaf lower than the rivers alone can explain. The water
+nobody measured is larger than the water they did.
+
+That missing water is evaporation. 3 things point to it:
+
+- The lake loses 3.53 ft of depth in an average year. That is what a salty lake in a desert
+  loses.
+- The loss reaches 0.71 ft in August and falls to near 0 in February. Evaporation follows the
+  sun.
+- The loss follows the air temperature of the month before, with a correlation of +0.856.
+
+`gsl-audit` puts the missing water back and reports what is still left over:
+
+| What the sum counts | Water left over |
+|---|---|
+| The 3 river gauges only | 143 kaf, or 0.304 ft of lake depth each month |
+| Rivers, evaporation, rain on the lake, and salt | 58 kaf, or 0.129 ft each month |
+
+The leftover stays the same size whether the lake is high or low. Across 4 bands of lake
+level it varies between 53 and 69 kaf, and its average is within 7 kaf of 0 in every band.
+It also stays the same size in years the model never saw while it was being fitted: 0.114,
+0.124 and 0.164 ft per month across 3 such blocks of years. The recent block, 2015 to 2026,
+is the worst of the 3. The lake is at its lowest in those years.
+
+This says where the remaining forecast error comes from. Suppose the next year's river flow,
+temperature and rainfall were all known exactly. A forecast 6 months out would still miss the
+gauge by 0.44 ft, because the measurements do not agree with each other any better than that.
+The best model today misses by 0.55 ft at 6 months. So most of the error at that range comes
+from the measurements, not from guessing the weather wrong.
+
+The repairs described above do not change the input of any model that is in production. The
+frozen development results are therefore still correct, and `gsl-results --verify-manifest`
+still passes.
 
 ## Tests and lint
 

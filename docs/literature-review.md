@@ -173,6 +173,48 @@ NRCS record. This repeatedly used cohort is development evidence, not an untouch
 barely beat persistence. From a January issue the snowpack models roughly halve the
 univariate April–June monthly-mean maximum error.
 
+## 8.1 What this project measured, 2026-09-04
+
+The process-model literature ranks the causes of lake-level change. This project has now
+checked that ranking against its own data, over 1989 to 2026.
+
+Mohammed and Tarboton put streamflow first and evaporation second. The check agrees, and it
+puts a size on the gap. The 3 gauged rivers cannot account for how much the lake changes: in
+each water year the lake ends up between 874 and 2689 kaf lower than they explain. The
+unmeasured water is larger than the measured water. It amounts to 3.53 ft of depth in an
+average year, reaches 0.71 ft in August, falls to near 0 in February, and follows the previous
+month's air temperature with a correlation of +0.856. Everything about it says evaporation. No
+model in this project represented evaporation before `water_balance`.
+
+Adding evaporation and rain on the lake cuts the monthly leftover from 0.304 ft to 0.129 ft.
+Adding salt cuts it a further 3% to 5%. Mohammed and Tarboton give salinity a sensitivity
+index of 0.09, the lowest of their 5, so the 2 results agree on its size.
+
+Dissolved salt mass is not constant, which balance studies assume more often than they check.
+The UGS AS2 record gives 1662 Mt in 1993 and 879 Mt in 2025, a fall of 47%. Mineral extraction
+removes salt and the causeway carries it to the north arm. A model that holds the mass fixed
+puts the modern lake at the wrong salinity, and so at the wrong evaporation rate.
+
+2 properties of the data constrain how a balance model can be built here.
+
+The first is the difference between an average and an instant. A monthly mean elevation is not
+the level on any single day. Treat the difference between 2 monthly means as the change in
+volume, and the error has a standard deviation of 75 kaf, against a real month-to-month
+signal of 184 kaf. That is 41% of the signal manufactured by the mismatch alone.
+`water_balance` steps between 2 month-end values for this reason and averages them to publish.
+
+The second is the causeway. `breach_kaf` cannot be treated as outflow from the south arm.
+Subtracting it drives the implied loss in water year 2011 to 7.2 ft, against a physical 3 to 4
+ft. Water moves both ways through the causeway and the gauge sees one direction. Dunn et al.
+(2025) model both directions with a salt flux, but that dataset covers only 2017 to 2023, so
+it can calibrate the term and cannot drive it.
+
+The practical consequence is a change in where to look for accuracy. Give a model the correct
+inflow, temperature and rainfall, and 6 months out it still misses the gauge by 0.44 ft,
+because the measurements do not agree with each other any better than that. The best model
+today misses by 0.55 ft. At short and medium leads the measurements, not the weather forecast,
+set the floor.
+
 ## 9. Implications for the multivariate implementation
 
 1. Priority predictor: SNOTEL SWE and accumulated precipitation for GSL-contributing sites, aggregated to a basin index (NRCS AWDB API; the NRCS GSL page lists the site set). This is what resolves the December-February cutoff problem documented in the README.

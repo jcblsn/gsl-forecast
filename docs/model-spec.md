@@ -41,18 +41,24 @@ All inputs come from live APIs. The table gives the first and last month with a 
 |---|---|---|---|---|
 | `avg_elevation` | USGS 10010000 | 1847-10 | 2026-08 | None; provisional same day |
 | `last_elevation`, `endpoint_3d_median`, `endpoint_7d_median` | USGS 10010000 | 1847-10 | 2026-08 | None; provisional same day |
+| `elevation_eom_ft` | USGS 10010000, under the configured endpoint rule | 1847-10 | 2026-08 | None; provisional same day |
 | `swe_eom_gsl`, `prec_wy_eom_gsl` | NRCS SNOTEL | 1978-10 | 2026-08 | None; daily values post next day |
 | `swe_pct_median_gsl` | NRCS SNOTEL | 1978-10 | 2026-05 | None, but October to May only |
 | `prec_pct_median_gsl` | NRCS SNOTEL | 1978-10 | 2026-08 | None |
 | `sms_eom_gsl` | NRCS SNOTEL | 1999-11 | 2026-08 | None |
 | `inflow_kaf_total` | USGS 10126000, 10141000, 10170490 | 1949-10 | 2026-08 | None; provisional same day |
+| `inflow_kaf_lake` | The same 3 gauges, divided by `delivery_ratio` | 1949-10 | 2026-08 | None |
+| `inflow_kaf_reported`, `n_inflow_gauges` | The same 3 gauges, partial sums allowed | 1907-10 | 2026-08 | None |
 | `breach_kaf` | USGS 10010020 | 2008-10 | 2026-08 | None |
 | `north_arm_ft`, `head_diff_ft` | USGS 10010100 | 1966-04 | 2026-08 | None |
-| `res_kaf_total` | NRCS AWDB, 21 Reclamation stations | 1911-01 | 2026-08 | A few days |
+| `res_kaf_total` | NRCS AWDB, 13 roster Reclamation stations | 1911-01 | 2026-08 | A few days |
+| `tmax_f_kslc`, `tmin_f_kslc`, `wind_mps_kslc`, `prcp_in_kslc` | NOAA NCEI, GHCN-D USW00024127 | 1948-01 | 2026-08 | None; a day posts the next day |
+| `salt_mass_mt`, `salt_mass_age_days` | UGS brine chemistry, site AS2 | 1966-06 | 2026-08 | Carried forward between campaigns |
+| `salinity_gl_lag1` | `salt_mass_mt` over the volume of the month before | 1966-07 | 2026-08 | None; the column is already lagged |
 | `tavg_f_gsl_lag1`, `prcp_in_gsl_lag1` | NOAA nClimDiv | 1895-02 | 2026-08 | None; the column is already shifted 1 month |
 | `nrcs_inflow_forecasts` | NRCS AWDB forecast point | 2024-01 | 2026-05 | None; January to May only |
 
-Three availability rules control which model may use which column.
+Four availability rules control which model may use which column.
 
 1. The percent-of-median snowpack columns are NULL in June, July, August and September. The
    median of the site sum is 0 in those months, and the transform divides by NULLIF of that
@@ -65,6 +71,17 @@ Three availability rules control which model may use which column.
    `tests/test_leakage.py` checks that no model names one.
 3. The published NRCS inflow forecast exists for January to May of 2024, 2025 and 2026. That
    is 15 publication dates. This is too few to fit a coefficient on.
+4. Salinity is dissolved salt divided by volume, and the lake level is a function of volume.
+   This month's salinity is therefore partly this month's level: the 2 correlate at -0.68 in
+   this record. A model that read salinity to predict level would be predicting the level
+   partly from itself. Only `salinity_gl_lag1` reaches `monthly_covariates`, and
+   `UNAVAILABLE_AT_ISSUE` names `salinity_gl`. `water_balance` works its salinity out from
+   the volume it is already tracking, not from the table.
+
+   The KSLC weather columns are the opposite case and carry no restriction. NCEI publishes a
+   day's weather about a day later, so the cutoff month is complete when the workflow runs on
+   the 2nd. A model can use measured weather for the cutoff month, which the nClimDiv columns
+   cannot supply.
 
 ### 2.0.1 The SNOTEL roster
 
@@ -114,9 +131,58 @@ that pass the threshold is 28 of 31 days, so the rule corrects a latent defect a
 published scores.
 
 USGS records an approval status and a qualifier with every daily value. Those fields were
-stored and then ignored. `inflow_provisional_days` and `inflow_estimated_days` count the days
-behind each month's inflow that USGS marks provisional or estimated, so a model or a reader
-can tell an approved month from a month USGS will revise. No model reads them yet.
+stored and then ignored. `inflow_provisional_days`, `inflow_estimated_days` and
+`inflow_ice_days` count the days behind each month's inflow that USGS marks provisional,
+estimated, or affected by ice, so a model or a reader can tell an approved month from a month
+USGS will revise. Ice matters for the winter Bear River record and it reaches the balance
+directly.
+
+`data_status` now refuses to issue a forecast when `inflow_day_coverage` is below 1, so a
+scaled month can no longer reach a forecast unannounced.
+
+There is deliberately no check on how much of the month is still provisional. USGS approves a
+month long after it ends, so the cutoff month is 100% provisional at every single issue. A
+check on it would fire every month, and a warning that always fires is one nobody reads. The
+issue metadata records the share instead, where it describes the data without blocking it.
+
+### 2.0.3 Two approval vocabularies
+
+USGS labels its data 2 different ways in the record this project holds. Rows before 2025 use
+the single letters `A` and `P`. Later rows use the words `Approved` and `Provisional`. The
+code searched for the word and so missed the letter. It counted 0 provisional days for
+January to May 2025; the correct count is 122.
+
+`src/pipeline/quality.py` now holds one definition of each label. New rows are normalised as
+they arrive, and the readers accept both forms, because the pipeline never revisits a row
+once it falls outside the 45-day refetch window.
+
+### 2.0.4 The reservoir roster
+
+`res_kaf_total` used to add up whichever reservoirs AWDB called active on the day the
+pipeline ran, plus any an earlier run had left behind in `reservoir_sites`. The station count
+moved from 1 to 21 to 19 over the record. The column was therefore measuring a different set
+of reservoirs in every era, and even between 2 runs on consecutive days.
+
+A roster now fixes the set at the 13 Reclamation stations that report in every month from
+1989-10. It follows the same rule and refuses the same 4 conditions as the SNOTEL roster.
+
+### 2.0.5 The end-of-month state
+
+`avg_elevation` averages the days of the month. A volume calculation needs 2 instants, not 2
+averages, so `elevation_eom_ft` carries a month-end value and `sources.endpoint_rule` chooses
+which one.
+
+Over 1989 to 2026, more smoothing always makes the water add up better. The leftover is 0.136
+ft per month using the last daily reading, 0.129 using the median of the last 3 days, and
+0.121 using the median of the last 7 days.
+
+Forecast accuracy does not follow. Lead-1 MAE is 0.094, 0.093 and 0.103 ft for the same 3
+rules, so the last reading and the 3-day median are indistinguishable, and the 7-day median is
+worse. Smoothing helps the arithmetic and eventually hurts the forecast, because it moves the
+starting point away from where the lake actually was.
+
+The default is `median_3d`. It matches the best forecast, and a single reading taken in high
+wind cannot move it.
 
 ## 2.1 The endpoint seasonal baseline
 
@@ -284,6 +350,115 @@ section 9:
 
 It trails `ets_damped_s12` at every lead and persistence after lead 7. The registry keeps it
 as a structural baseline for experiments, while `PRODUCTION_MODELS` excludes it.
+
+## 4.2 The water_balance model
+
+Every other model here predicts a lake level from earlier lake levels. This model counts the
+water instead. Each month it adds the water that arrives and subtracts the water that leaves.
+The result is a volume, and the hypsometry table turns that volume into a level.
+
+The difference matters because the other models cannot separate the causes. One coefficient
+in `inflow_chain` holds evaporation, rain on the lake, unmeasured rivers and causeway flow
+together in a single number. This model gives each of those its own term.
+
+The model tracks the volume of water in the lake at the end of each month:
+
+```
+V[t] = V[t-1] + b_Q * Q[t] + b_P * P[t] * A[t-1] - b_E * E[t] * f(S[t-1]) * A[t-1]
+       + a[month] * A[t-1] + R[month] * A[t-1] + c
+```
+
+| Symbol | Meaning | Source |
+|---|---|---|
+| `V` | South-arm storage, kaf | `elevation_eom_ft` through the USGS bathymetry |
+| `A` | South-arm area, acres, at the month before | The same bathymetry |
+| `Q` | Gauged tributary inflow, kaf | `inflow_kaf_total` |
+| `P` | Precipitation depth on the lake, ft | `prcp_in_kslc` |
+| `E` | Hargreaves reference evaporation depth, ft | `tmax_f_kslc`, `tmin_f_kslc` |
+| `S` | Salinity, g/L, at the month before | `salt_mass_mt` over `V[t-1]` |
+| `f` | Evaporation suppression by salt | `1 - k * S / 1000`, `k` fitted |
+| `a` | Season term, ft of depth | Fitted, 11 terms with January as the reference |
+| `R` | `net_unmeasured_flux`, ft of depth | The closure residual, pooled by calendar month |
+
+`R` is the water the sum does not account for. It is not evaporation, and it is not water
+that people used. It mixes 4 things together: flow through the causeway, error in how much
+river water reaches the lake, error in the map of the lake bed, and the part of evaporation
+that temperature alone cannot predict. Its name says only that, and claims nothing more.
+
+The area and the salinity both come from the previous month, for the same reason. A larger
+lake has more surface to evaporate from, so the area belongs in the sum. But the area is also
+a consequence of the volume, which is the answer. Using this month's area would use the answer
+to compute the answer.
+
+Salinity has the same problem, and worse. Salinity is dissolved salt divided by volume, and
+the level is a function of volume, so this month's salinity is partly this month's level. The
+2 measurements correlate at -0.68 in this record. The model therefore works its salinity out
+from the volume it is already tracking, and never reads it from the table.
+`UNAVAILABLE_AT_ISSUE` lists `salinity_gl` so that no other model can read it either.
+
+### Observation operator
+
+The forecast this project publishes is an average over a month. The volume the model tracks
+is a single instant, at the month's end. These are not the same thing. Publishing the
+month-end value as if it were the monthly average would shift the whole forecast half a month
+late. The model therefore averages the 2 month-end values on either side of the month.
+
+The gap between the 2 is not small. Take the difference between 2 monthly averages and call
+it the change in volume, and the error has a standard deviation of 75 kaf. The real month to
+month change has a standard deviation of 184 kaf. So 41% of the signal is noise created by
+mixing up an average with an instant.
+
+### Forcing beyond the cutoff
+
+Nobody knows next year's weather. The river inflow comes from the same snowpack regression
+`inflow_chain` uses. The weather comes from the KSLC average for that calendar month over the
+training years. Neither reads anything from after the cutoff. Past about 12 months the
+snowpack regression shows no skill at all, so from there the model runs on averages and does
+not pretend otherwise.
+
+### What the balance closes to
+
+Fitted over 1989-11 to 2026-08, 442 closed monthly steps:
+
+| Specification | Residual |
+|---|---|
+| Gauged inflow alone | 143 kaf, 0.304 ft/month |
+| Full balance | 58 kaf, 0.129 ft/month |
+
+Fitted terms: evaporation scale 1.09 on Hargreaves, precipitation scale 0.82 on KSLC,
+salinity suppression 2.75 (a 36% reduction at 130 g/L), and a gauged-to-delivered inflow
+ratio of 1.28.
+
+That last number contradicts the assumption it was meant to test, so it is worth stating
+plainly. The configured `delivery_ratio` of 0.8246 says the gauges measure less water than
+the lake actually receives, because small streams and groundwater arrive below them. The fit
+says the reverse: 1 kaf passing the gauges raises the lake by only about 0.78 kaf. Water lost
+in the wetlands and canals between the gauges and the open lake would explain that.
+
+Do not treat the fitted number as a measurement yet. The season terms and the leftover absorb
+part of the same signal, so the 3 cannot be cleanly separated. `get_metrics` prints both the
+assumption and the fit on every run, so the next round of work can pull them apart.
+
+### Residual stability
+
+`gsl-audit` reports the leftover in kaf, and breaks it down by how full the lake was and by
+years the fit never saw. Across 4 bands of lake level its standard deviation is 53 to 69 kaf
+and its average is within 7 kaf of 0. Across 3 blocks of held-out years it is 0.114, 0.124
+and 0.164 ft per month. The block from 2015 to 2026 is the worst; the lake is at its lowest
+in those years. A leftover that stayed small only in the years it was fitted on would be a
+fitted constant, not a measurement.
+
+### Accuracy
+
+These numbers come from the development split and its 157 cutoffs. At lead 1 `water_balance`
+beats `swe_head` by 0.024 ft, and the bootstrap interval of [0.009, 0.039] does not contain
+0, so that gain is real. At every other lead the interval does contain 0, which means the 2
+models cannot be told apart there. The registry scores the model and `PRODUCTION_MODELS`
+leaves it out, under the same rule that leaves out `state_space`.
+
+The salt term pays for itself at long leads. Against `water_balance_nosalt` it is worth 0.067
+ft at lead 18 and 0.106 ft at lead 24, and neither interval contains 0. That is the return on
+the UGS brine record.
 
 ## 5 The blend
 
